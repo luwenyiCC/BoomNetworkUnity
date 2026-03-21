@@ -51,6 +51,8 @@ namespace BoomNetworkDemo
         public event Action<Person> OnReconnected;
         /// <summary>准备就绪（首次加入 或 重连成功，统一回调）</summary>
         public event Action<Person> OnReady;
+        /// <summary>离开房间（携带旧 PlayerId，用于清理 Entity）</summary>
+        public event Action<Person, int> OnLeftRoom;
         public event Action<Person, FrameSyncInitData> OnFrameSyncStart;
         public event Action<Person, FrameData> OnFrame;
         public event Action<Person> OnDisconnected;
@@ -203,6 +205,20 @@ namespace BoomNetworkDemo
                 OnJoinedRoom?.Invoke(this);
                 // Fix #3: 首次加入也触发 OnReady
                 OnReady?.Invoke(this);
+            });
+        }
+
+        public void LeaveRoom()
+        {
+            if (State != PersonState.InRoom && State != PersonState.Syncing) return;
+            int oldPlayerId = PlayerId;
+            _roomClient?.LeaveRoom(() =>
+            {
+                Log($"Left room {RoomId}");
+                OnLeftRoom?.Invoke(this, oldPlayerId);
+                ClearIdentity();
+                _savedFrameNumber = 0;
+                State = PersonState.Connected;
             });
         }
 

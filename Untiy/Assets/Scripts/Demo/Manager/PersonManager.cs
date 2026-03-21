@@ -47,15 +47,33 @@ namespace BoomNetworkDemo
             [TableColumnWidth(60), DisplayAsString]
             public string frame = "0";
 
-            [TableColumnWidth(60)]
-            [Button("Connect")]
+            [TableColumnWidth(50)]
+            [Button("Conn")]
             public void BtnConnect()
             {
                 _manager?.ConnectPerson(this, null);
             }
 
-            [TableColumnWidth(70)]
-            [Button("Disconnect")]
+            [TableColumnWidth(50)]
+            [Button("Join")]
+            public void BtnJoin()
+            {
+                if (person?.State == PersonState.Connected && _manager != null)
+                {
+                    person.JoinRoom(_manager._currentRoomId);
+                    _manager.Log($"[{inputMode}] Joining room {_manager._currentRoomId}...");
+                }
+            }
+
+            [TableColumnWidth(50)]
+            [Button("Leave")]
+            public void BtnLeave()
+            {
+                person?.LeaveRoom();
+            }
+
+            [TableColumnWidth(50)]
+            [Button("Disc")]
             public void BtnDisconnect()
             {
                 _manager?.DisconnectPerson(this);
@@ -138,28 +156,118 @@ namespace BoomNetworkDemo
         // ===================== Room =====================
 
         [TitleGroup("Room")]
-        [DisplayAsString, LabelWidth(80)]
-        public string roomInfo = "No room";
-
-        [TitleGroup("Room")]
+        [HorizontalGroup("Room/H1")]
         [Button("Refresh Rooms"), GUIColor(0.3f, 0.6f, 0.9f)]
         void RefreshRooms()
         {
-            // 用第一个已连接的 Person 查询
-            foreach (var slot in persons)
+            var p = FindConnectedPerson();
+            if (p == null) { Log("No connected person"); return; }
+            p.GetRoomClient()?.GetRooms(rooms =>
             {
-                if (slot.person?.State == PersonState.Connected || slot.person?.State == PersonState.InRoom)
+                _roomList.Clear();
+                foreach (var r in rooms)
                 {
-                    slot.person.GetRoomClient()?.GetRooms(rooms =>
+                    _roomList.Add(new RoomDisplay
                     {
-                        roomInfo = $"{rooms.Length} room(s)";
-                        foreach (var r in rooms)
-                            Log($"  Room {r.RoomId}: {r.PlayerCount}/{r.MaxPlayers} {(r.Running ? "Playing" : "Waiting")}");
+                        roomId = r.RoomId,
+                        players = $"{r.PlayerCount}/{r.MaxPlayers}",
+                        status = r.Running ? "Playing" : "Waiting",
+                        _mgr = this,
                     });
-                    return;
+                }
+                Log($"Refreshed: {rooms.Length} room(s)");
+            });
+        }
+
+        [HorizontalGroup("Room/H1")]
+        [Button("Create Room"), GUIColor(0.2f, 0.7f, 0.4f)]
+        void CreateRoom()
+        {
+            var p = FindConnectedPerson();
+            if (p == null) { Log("No connected person"); return; }
+            p.GetRoomClient()?.CreateRoom(config.defaultMaxPlayers, rid =>
+            {
+                _currentRoomId = rid;
+                Log($"Room {rid} created");
+                RefreshRooms();
+            });
+        }
+
+        [TitleGroup("Room")]
+        [TableList(IsReadOnly = true, AlwaysExpanded = true)]
+        [SerializeField]
+        private List<RoomDisplay> _roomList = new();
+
+        [Serializable]
+        public class RoomDisplay
+        {
+            [TableColumnWidth(50)]
+            public int roomId;
+
+            [TableColumnWidth(70)]
+            public string players;
+
+            [TableColumnWidth(70)]
+            public string status;
+
+            [TableColumnWidth(80)]
+            [Button("Join All")]
+            public void BtnJoinAll()
+            {
+                if (_mgr == null) return;
+                _mgr._currentRoomId = roomId;
+                foreach (var slot in _mgr.persons)
+                {
+                    if (slot.person?.State == PersonState.Connected)
+                    {
+                        slot.person.JoinRoom(roomId);
+                        _mgr.Log($"[{slot.inputMode}] Joining room {roomId}...");
+                    }
                 }
             }
-            Log("No connected person to query rooms");
+
+            [TableColumnWidth(50)]
+            [Button("Select")]
+            public void BtnSelect()
+            {
+                if (_mgr != null)
+                {
+                    _mgr._currentRoomId = roomId;
+                    _mgr.Log($"Selected room {roomId}");
+                }
+            }
+
+            [NonSerialized] internal PersonManager _mgr;
+        }
+
+        [TitleGroup("Room")]
+        [HorizontalGroup("Room/H3")]
+        [DisplayAsString, LabelWidth(80)]
+        public string selectedRoom = "None";
+
+        [HorizontalGroup("Room/H3")]
+        [Button("Leave All"), GUIColor(0.8f, 0.5f, 0.2f)]
+        void LeaveAll()
+        {
+            foreach (var slot in persons)
+            {
+                if (slot.person?.State == PersonState.InRoom || slot.person?.State == PersonState.Syncing)
+                {
+                    slot.person.LeaveRoom();
+                    Log($"[{slot.inputMode}] Leaving room...");
+                }
+            }
+        }
+
+        Person FindConnectedPerson()
+        {
+            foreach (var slot in persons)
+            {
+                if (slot.person != null && (slot.person.State == PersonState.Connected ||
+                    slot.person.State == PersonState.InRoom || slot.person.State == PersonState.Syncing))
+                    return slot.person;
+            }
+            return null;
         }
 
         // ===================== Sync Check =====================
@@ -184,7 +292,7 @@ namespace BoomNetworkDemo
         // ===================== Internal =====================
 
         private Dictionary<int, PlayerEntity> _entities = new();
-        private int _authorityIndex = 0; // 哪个 Person 的帧数据驱动世界
+        private Person _authorityPerson; // 当前驱动世界渲染的 Person
         private int _currentRoomId = -1;
         private byte[] _inputBuf = new byte[8];
 
@@ -227,6 +335,12 @@ namespace BoomNetworkDemo
             }
 
             UpdateSyncStatus();
+            UpdateAuthority();
+            selectedRoom = _currentRoomId > 0 ? $"Room {_currentRoomId}" : "None";
+
+            // 绑定 RoomDisplay._mgr（新添加的没绑）
+            foreach (var rd in _roomList)
+                rd._mgr ??= this;
         }
 
         void OnDestroy()
@@ -282,7 +396,7 @@ namespace BoomNetworkDemo
                 person.OnJoinedRoom += p =>
                 {
                     _currentRoomId = p.RoomId;
-                    roomInfo = $"Room {p.RoomId}";
+                    selectedRoom = $"Room {p.RoomId}";
                     SpawnEntity(p.PlayerId, slot.color, slot.inputMode.ToString());
                 };
 
@@ -291,23 +405,35 @@ namespace BoomNetworkDemo
                     Log($"[{slot.inputMode}] Reconnected as P{p.PlayerId}!");
                 };
 
-                // Fix #3: OnReady 统一回调（首次加入 和 重连成功 都触发）
-                person.OnReady += p =>
+                // Fix #3: OnReady 统一回调，一次性（避免手动重连时误触 ConnectSequential）
+                if (onReady != null)
                 {
-                    onReady?.Invoke();
-                };
+                    Action<Person> readyHandler = null;
+                    readyHandler = p =>
+                    {
+                        person.OnReady -= readyHandler; // 触发一次后取消订阅
+                        onReady.Invoke();
+                    };
+                    person.OnReady += readyHandler;
+                }
 
                 person.OnFrameSyncStart += (p, data) =>
                 {
                     Log($"[{slot.inputMode}] Syncing!");
                 };
 
-                // Authority: 第一个 Person 的帧数据驱动世界
-                int index = persons.IndexOf(slot);
-                if (index == 0)
+                // 所有 Person 都注册 OnFrame，由 authority 机制决定谁驱动渲染
+                person.OnFrame += (p, frame) =>
                 {
-                    person.OnFrame += (p, frame) => OnAuthorityFrame(frame);
-                }
+                    if (p == _authorityPerson)
+                        OnAuthorityFrame(frame);
+                };
+
+                person.OnLeftRoom += (p, oldPlayerId) =>
+                {
+                    Log($"[{slot.inputMode}] Left room, destroying P{oldPlayerId}");
+                    DestroyEntity(oldPlayerId);
+                };
 
                 person.OnDisconnected += p =>
                 {
@@ -383,7 +509,43 @@ namespace BoomNetworkDemo
             Log($"Spawned {label} (Player {playerId})");
         }
 
+        void DestroyEntity(int playerId)
+        {
+            if (playerId <= 0) return;
+            if (_entities.TryGetValue(playerId, out var entity))
+            {
+                if (entity != null)
+                    Destroy(entity.gameObject);
+                _entities.Remove(playerId);
+            }
+        }
+
         // ===================== Sync Check =====================
+
+        void UpdateAuthority()
+        {
+            // 当前 authority 还在 Syncing，不用迁移
+            if (_authorityPerson?.State == PersonState.Syncing)
+                return;
+
+            // 找第一个 Syncing 的 Person 作为新 authority
+            Person oldAuth = _authorityPerson;
+            _authorityPerson = null;
+            foreach (var slot in persons)
+            {
+                if (slot.person?.State == PersonState.Syncing)
+                {
+                    _authorityPerson = slot.person;
+                    break;
+                }
+            }
+
+            if (_authorityPerson != oldAuth && _authorityPerson != null)
+            {
+                var authSlot = persons.Find(s => s.person == _authorityPerson);
+                Log($"Authority migrated to [{authSlot?.inputMode}] P{_authorityPerson.PlayerId}");
+            }
+        }
 
         void UpdateSyncStatus()
         {

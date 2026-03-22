@@ -85,6 +85,11 @@ namespace BoomNetworkDemo
 
             GUILayout.Label($"  FPS: {_fps:F0}", _textStyle);
             GUILayout.Label($"  Sync: {_mgr?.syncStatus ?? "?"}", _textStyle);
+            if (_mgr != null && _mgr.enablePrediction && _mgr.PredictionStats != null)
+            {
+                var ps = _mgr.PredictionStats;
+                GUILayout.Label($"  <color=cyan>Prediction: ahead={ps.ahead} rollbacks={ps.totalRollbacks} frames={ps.totalRollbackFrames}</color>", _textStyle);
+            }
             GUILayout.EndArea();
 
             // === 右上角：操作提示 ===

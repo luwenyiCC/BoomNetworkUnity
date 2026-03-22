@@ -249,6 +249,24 @@ namespace BoomNetworkDemo
                 _frameSync?.SendInput(data);
         }
 
+        public void PredictWithInput(byte[] data)
+        {
+            if (State == PersonState.Syncing)
+                _frameSync?.PredictWithInput(data);
+        }
+
+        public void SetPrediction(BoomNetwork.Core.Prediction.PredictionManager prediction)
+        {
+            if (_frameSync != null)
+                _frameSync.Prediction = prediction;
+        }
+
+        public void ClearPrediction()
+        {
+            if (_frameSync != null)
+                _frameSync.Prediction = null;
+        }
+
         public void Tick(float deltaTimeMs)
         {
             _connMgr?.Tick(deltaTimeMs);

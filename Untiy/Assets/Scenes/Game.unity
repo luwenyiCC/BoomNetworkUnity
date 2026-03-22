@@ -168,7 +168,11 @@ MonoBehaviour:
   _roomList: []
   selectedRoom: None
   syncStatus: Waiting...
-  logText: 
+  logText: '[23:16:21] [WASD] Connecting to 127.0.0.1:9000...
+
+'
+  enablePrediction: 0
+  smoothSpeed: 15
 --- !u!4 &996313973
 Transform:
   m_ObjectHideFlags: 0
@@ -210,7 +214,7 @@ GameObject:
   - component: {fileID: 1733009473}
   m_Layer: 0
   m_Name: Camera
-  m_TagString: Untagged
+  m_TagString: MainCamera
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0

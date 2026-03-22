@@ -352,19 +352,24 @@ namespace BoomNetworkDemo
                 // Tick 输入
                 slot.inputProvider?.Tick(Time.deltaTime);
 
-                // 发送输入（按服务器帧率节流，不是每 Unity Update 都发）
+                // 发送输入（按服务器帧率节流 + 只在有输入时发送）
                 if (_shouldSendInput && slot.person.State == PersonState.Syncing && slot.inputProvider != null)
                 {
                     var dir = slot.inputProvider.GetMoveInput();
-                    EncodeInput(dir, _inputBuf);
+                    bool hasInput = dir.x != 0 || dir.y != 0;
 
-                    if (_predictionEnabled && slot.person == _authorityPerson)
+                    if (hasInput)
                     {
-                        slot.person.PredictWithInput(dt, _inputBuf);
-                    }
-                    else
-                    {
-                        slot.person.SendInput(_inputBuf);
+                        EncodeInput(dir, _inputBuf);
+
+                        if (_predictionEnabled && slot.person == _authorityPerson)
+                        {
+                            slot.person.PredictWithInput(dt, _inputBuf);
+                        }
+                        else
+                        {
+                            slot.person.SendInput(_inputBuf);
+                        }
                     }
                 }
 

@@ -311,7 +311,7 @@ namespace BoomNetworkDemo
         private bool _predictionEnabled;
         [TitleGroup("Config")]
         [LabelWidth(120)]
-        public bool enablePrediction = true;
+        public bool enablePrediction = false;
         [TitleGroup("Config")]
         [LabelWidth(120), ShowIf("enablePrediction")]
         [Tooltip("渲染追逐逻辑位置的速度。越大越快到位，0=立刻到位（无平滑）")]
@@ -350,8 +350,8 @@ namespace BoomNetworkDemo
 
                     if (_predictionEnabled && slot.person == _authorityPerson)
                     {
-                        // 预测模式: authority 用 PredictWithInput（立刻执行 + 发送）
-                        slot.person.PredictWithInput(_inputBuf);
+                        // 预测模式: authority 用 PredictWithInput（按服务器帧率节流）
+                        slot.person.PredictWithInput(dt, _inputBuf);
                     }
                     else
                     {

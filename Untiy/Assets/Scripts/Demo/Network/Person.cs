@@ -249,10 +249,10 @@ namespace BoomNetworkDemo
                 _frameSync?.SendInput(data);
         }
 
-        public void PredictWithInput(byte[] data)
+        public void PredictWithInput(float deltaTimeMs, byte[] data)
         {
             if (State == PersonState.Syncing)
-                _frameSync?.PredictWithInput(data);
+                _frameSync?.PredictWithInput(deltaTimeMs, data);
         }
 
         public void SetPrediction(BoomNetwork.Core.Prediction.PredictionManager prediction)

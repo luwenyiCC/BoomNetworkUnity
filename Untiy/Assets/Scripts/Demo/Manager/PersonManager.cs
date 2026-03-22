@@ -314,7 +314,9 @@ namespace BoomNetworkDemo
         public bool enablePrediction = true;
         [TitleGroup("Config")]
         [LabelWidth(120), ShowIf("enablePrediction")]
-        public float visualSmoothing = 0.25f;
+        [Tooltip("渲染追逐逻辑位置的速度。越大越快到位，0=立刻到位（无平滑）")]
+        [Range(0f, 30f)]
+        public float smoothSpeed = 15f;
 
         void Awake()
         {
@@ -374,8 +376,8 @@ namespace BoomNetworkDemo
                     if (_entities.TryGetValue(kv.Key, out var entity) && entity != null)
                     {
                         var target = new Vector3(kv.Value.x, kv.Value.y, 0);
-                        if (visualSmoothing > 0)
-                            entity.transform.position = Vector3.Lerp(entity.transform.position, target, 1f - visualSmoothing);
+                        if (smoothSpeed > 0)
+                            entity.transform.position = Vector3.Lerp(entity.transform.position, target, smoothSpeed * Time.deltaTime);
                         else
                             entity.transform.position = target;
                     }

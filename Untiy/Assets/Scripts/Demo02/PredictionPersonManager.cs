@@ -12,12 +12,13 @@ namespace BoomNetworkDemo
         // ===================== Config =====================
 
         [InfoBox(
-            "Quick Start:\n" +
-            "1. BoomNetwork > Server Window > Start Server\n" +
+            "Demo02 - Prediction & Rollback\n" +
+            "1. BoomNetwork > Server Window > Start Server (no -autoroom)\n" +
             "2. Play this scene\n" +
-            "3. Click [Connect All] below\n" +
+            "3. Click [Connect All]\n" +
             "4. Click [Start Game]\n" +
-            "5. WASD = Player 1, Arrows = Player 2",
+            "5. Toggle [Enable Prediction] to compare\n" +
+            "6. WASD = Player 1, Arrows = Player 2",
             InfoMessageType.Info)]
         [TitleGroup("Config")]
         [InlineEditor(ObjectFieldMode = InlineEditorObjectFieldModes.Boxed)]
@@ -546,7 +547,9 @@ namespace BoomNetworkDemo
             if (frame.Inputs == null) return;
 
             // 帧同步固定增量: moveSpeed * frameInterval(秒)
-            float frameInterval = 1f / 20f;  // TODO: 从 FrameSyncInitData 获取
+            var initData = _authorityPerson?.GetFrameSyncInitData();
+            float frameIntervalMs = initData.HasValue ? initData.Value.FrameInterval : 50f;
+            float frameInterval = frameIntervalMs / 1000f;
             float delta = moveSpeed * frameInterval;
 
             for (int i = 0; i < frame.Inputs.Length; i++)

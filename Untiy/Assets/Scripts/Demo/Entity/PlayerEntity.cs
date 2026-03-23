@@ -74,9 +74,12 @@ namespace BoomNetworkDemo
             WrapPosition();
         }
 
+        private Camera _cachedCam;
+
         void WrapPosition()
         {
-            var cam = Camera.main;
+            if (_cachedCam == null) _cachedCam = Camera.main;
+            var cam = _cachedCam;
             if (cam == null) return;
 
             // 正交摄像机的世界空间边界

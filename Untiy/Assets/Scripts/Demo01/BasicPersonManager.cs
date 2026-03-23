@@ -345,8 +345,9 @@ namespace BoomNetworkDemo
         void OnAuthorityFrame(FrameData frame)
         {
             if (frame.Inputs == null) return;
-            float frameInterval = 1f / 20f;
-            float delta = moveSpeed * frameInterval;
+            var initData = _authorityPerson?.GetFrameSyncInitData();
+            float frameIntervalMs = initData.HasValue ? initData.Value.FrameInterval : 50f;
+            float delta = moveSpeed * (frameIntervalMs / 1000f);
 
             for (int i = 0; i < frame.Inputs.Length; i++)
             {
@@ -430,15 +431,19 @@ namespace BoomNetworkDemo
 
         byte[] TakeWorldSnapshot()
         {
-            int count = _entities.Count;
+            // 排序 key 保证确定性遍历顺序
+            var sortedKeys = new List<int>(_entities.Keys);
+            sortedKeys.Sort();
+
+            int count = sortedKeys.Count;
             var buf = new byte[2 + count * 12];
             buf[0] = (byte)(count & 0xFF);
             buf[1] = (byte)((count >> 8) & 0xFF);
             int offset = 2;
-            foreach (var kv in _entities)
+            foreach (var key in sortedKeys)
             {
-                var pos = kv.Value != null ? (Vector2)kv.Value.transform.position : Vector2.zero;
-                BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), kv.Key); offset += 4;
+                var pos = _entities[key] != null ? (Vector2)_entities[key].transform.position : Vector2.zero;
+                BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), key); offset += 4;
                 BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), pos.x); offset += 4;
                 BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), pos.y); offset += 4;
             }

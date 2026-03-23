@@ -35,6 +35,9 @@ namespace BoomNetworkDemo
         // Fix #1: 断线时保存帧号，重连时发给服务器
         private uint _savedFrameNumber;
 
+        // 缓存服务器下发的 InitData，重连后恢复给新 FrameSyncClient
+        private FrameSyncInitData? _cachedInitData;
+
         // 内部网络栈
         private TcpClientTransport _transport;
         private NetworkSession _session;
@@ -91,8 +94,9 @@ namespace BoomNetworkDemo
 
             _frameSync.OnFrameSyncStart += data =>
             {
+                _cachedInitData = data;
                 State = PersonState.Syncing;
-                Log($"FrameSync started (rate={data.FrameRate})");
+                Log($"FrameSync started (rate={data.FrameRate}, snapshot={data.SnapshotInterval}, quickReconnectMs={data.QuickReconnectMaxMs})");
                 OnFrameSyncStart?.Invoke(this, data);
             };
 
@@ -121,7 +125,7 @@ namespace BoomNetworkDemo
                 Log($"Sending Reconnect (pid={PlayerId}, lastFrame={_savedFrameNumber})");
                 var data = new byte[8];
                 BitConverter.GetBytes(PlayerId).CopyTo(data, 0);
-                BitConverter.GetBytes((int)_savedFrameNumber).CopyTo(data, 4);
+                BitConverter.GetBytes(_savedFrameNumber).CopyTo(data, 4);
 
                 _session.SendAsync(FrameSyncCmd.Reconnect, data, 5000,
                     onResponse: HandleReconnectResponse,
@@ -178,7 +182,14 @@ namespace BoomNetworkDemo
                     Log($"Snapshot loaded (frame {snapshotFrame}, {snapshotData.Length} bytes)");
                 }
 
-                // 恢复 FrameSyncClient 状态
+                // 恢复 FrameSyncClient 状态 + 服务器配置
+                if (_frameSync != null && _cachedInitData.HasValue)
+                {
+                    var init = _cachedInitData.Value;
+                    if (init.SnapshotInterval > 0)
+                        _frameSync.SnapshotInterval = (uint)init.SnapshotInterval;
+                }
+
                 if (serverFrame > 0)
                 {
                     _frameSync?.ResumeAsSyncing(PlayerId);

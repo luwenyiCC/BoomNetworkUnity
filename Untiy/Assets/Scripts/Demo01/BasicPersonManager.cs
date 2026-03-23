@@ -338,6 +338,16 @@ namespace BoomNetworkDemo
                     DestroyEntity(pid);
                     Log($"Remote player {pid} left");
                 };
+                person.OnRemotePlayerOffline += (p, pid) =>
+                {
+                    if (_entities.TryGetValue(pid, out var e) && e != null) e.SetOffline();
+                    Log($"Remote player {pid} offline");
+                };
+                person.OnRemotePlayerOnline += (p, pid) =>
+                {
+                    if (_entities.TryGetValue(pid, out var e) && e != null) e.SetOnline();
+                    Log($"Remote player {pid} back online");
+                };
 
                 person.OnFrameSyncStart += (p, data) => Log($"[{slot.inputMode}] Syncing!");
                 // 帧号去重: 任何 Person 收到的帧都处理，同一帧号只处理一次

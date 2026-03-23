@@ -63,6 +63,10 @@ namespace BoomNetworkDemo
         public event Action<Person, int> OnRemotePlayerJoined;
         /// <summary>其他玩家离开房间（服务器推送）</summary>
         public event Action<Person, int> OnRemotePlayerLeft;
+        /// <summary>其他玩家临时掉线</summary>
+        public event Action<Person, int> OnRemotePlayerOffline;
+        /// <summary>其他玩家恢复在线</summary>
+        public event Action<Person, int> OnRemotePlayerOnline;
         public event Action<Person> OnDisconnected;
         public event Action<Person, string> OnLog;
 
@@ -111,6 +115,8 @@ namespace BoomNetworkDemo
 
             _frameSync.OnPlayerJoined += pid => OnRemotePlayerJoined?.Invoke(this, pid);
             _frameSync.OnPlayerLeft += pid => OnRemotePlayerLeft?.Invoke(this, pid);
+            _frameSync.OnPlayerOffline += pid => OnRemotePlayerOffline?.Invoke(this, pid);
+            _frameSync.OnPlayerOnline += pid => OnRemotePlayerOnline?.Invoke(this, pid);
 
             _frameSync.OnError += err => Log($"Error: {err}");
             _roomClient.OnError += err => Log($"Room Error: {err}");

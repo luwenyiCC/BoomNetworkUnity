@@ -8,11 +8,14 @@ namespace BoomNetworkDemo
     public class PlayerEntity : MonoBehaviour
     {
         public int PlayerId { get; private set; }
+        public bool IsOffline { get; private set; }
 
         private SpriteRenderer _sprite;
         private SpriteRenderer _dirArrow;
         private TextMesh _label;
         private Vector2 _lastDir;
+        private Color _baseColor;
+        private string _baseLabel;
 
         public static PlayerEntity Spawn(int playerId, Color color, string label)
         {
@@ -55,7 +58,27 @@ namespace BoomNetworkDemo
             entity._sprite = sr;
             entity._dirArrow = arrowSr;
             entity._label = tm;
+            entity._baseColor = color;
+            entity._baseLabel = $"{label}\nP{playerId}";
             return entity;
+        }
+
+        public void SetOffline()
+        {
+            if (IsOffline) return;
+            IsOffline = true;
+            if (_sprite != null) _sprite.color = new Color(_baseColor.r * 0.3f, _baseColor.g * 0.3f, _baseColor.b * 0.3f, 0.5f);
+            if (_label != null) _label.text = $"{_baseLabel}\n<color=red>OFFLINE</color>";
+            if (_label != null) _label.color = Color.red;
+        }
+
+        public void SetOnline()
+        {
+            if (!IsOffline) return;
+            IsOffline = false;
+            if (_sprite != null) _sprite.color = _baseColor;
+            if (_label != null) _label.text = _baseLabel;
+            if (_label != null) _label.color = _baseColor;
         }
 
         /// <summary>

@@ -224,6 +224,10 @@ namespace BoomNetworkDemo
         [DisplayAsString, HideLabel, GUIColor("GetSyncColor")]
         public string syncStatus = "Waiting...";
 
+        [TitleGroup("Sync")]
+        [DisplayAsString, LabelWidth(80)]
+        public string worldHash = "-";
+
         [TitleGroup("Log")]
         [DisplayAsString, HideLabel, MultiLineProperty(8), PropertyOrder(100)]
         public string logText = "";
@@ -277,6 +281,7 @@ namespace BoomNetworkDemo
             }
 
             UpdateSyncStatus();
+            UpdateWorldHash();
             foreach (var rd in _roomList) rd._mgr ??= this;
         }
 
@@ -486,6 +491,38 @@ namespace BoomNetworkDemo
             logText = line + "\n" + logText;
             if (logText.Length > 3000) logText = logText.Substring(0, 3000);
             Debug.Log($"[Demo01.1] {msg}");
+        }
+
+        void UpdateWorldHash()
+        {
+            if (_entities.Count == 0) { worldHash = "-"; return; }
+
+            // 按 PlayerId 排序保证两边顺序一致
+            var sortedKeys = new List<int>(_entities.Keys);
+            sortedKeys.Sort();
+
+            // FNV-1a hash: 位置(truncate to int) + 旋转(truncate to int)
+            uint hash = 2166136261u;
+            foreach (var key in sortedKeys)
+            {
+                var entity = _entities[key];
+                if (entity == null) continue;
+
+                var pos = entity.transform.position;
+                var rot = entity.transform.rotation.eulerAngles;
+
+                // 乘 100 再取整，保留两位小数精度
+                int px = (int)(pos.x * 100);
+                int py = (int)(pos.y * 100);
+                int rz = (int)(rot.z * 100);
+
+                hash ^= (uint)key; hash *= 16777619u;
+                hash ^= (uint)px;  hash *= 16777619u;
+                hash ^= (uint)py;  hash *= 16777619u;
+                hash ^= (uint)rz;  hash *= 16777619u;
+            }
+
+            worldHash = $"{hash:X8} ({_entities.Count}e)";
         }
 
         Color GetSyncColor()

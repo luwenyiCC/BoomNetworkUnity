@@ -50,6 +50,7 @@ namespace BoomNetworkDemo
             GUILayout.Label($"  FPS: {_fps:F0}", _textStyle);
             GUILayout.Label($"  Room: {_mgr?.targetRoomId ?? 0}", _textStyle);
             GUILayout.Label($"  Sync: {_mgr?.syncStatus ?? "?"}", _textStyle);
+            GUILayout.Label($"  Hash: <color=cyan>{_mgr?.worldHash ?? "-"}</color>", _textStyle);
             GUILayout.EndArea();
 
             // Right: Controls

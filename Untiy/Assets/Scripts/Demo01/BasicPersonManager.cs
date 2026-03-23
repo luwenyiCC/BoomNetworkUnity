@@ -325,6 +325,20 @@ namespace BoomNetworkDemo
                     person.OnReady += readyHandler;
                 }
 
+                person.OnRemotePlayerJoined += (p, pid) =>
+                {
+                    if (!_entities.ContainsKey(pid))
+                    {
+                        SpawnEntity(pid, Color.gray, $"P{pid}");
+                        Log($"Remote player {pid} joined");
+                    }
+                };
+                person.OnRemotePlayerLeft += (p, pid) =>
+                {
+                    DestroyEntity(pid);
+                    Log($"Remote player {pid} left");
+                };
+
                 person.OnFrameSyncStart += (p, data) => Log($"[{slot.inputMode}] Syncing!");
                 // 帧号去重: 任何 Person 收到的帧都处理，同一帧号只处理一次
                 // 不依赖 authority，避免重连时补帧被丢弃

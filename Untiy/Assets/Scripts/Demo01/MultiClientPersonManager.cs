@@ -322,6 +322,20 @@ namespace BoomNetworkDemo
                     person.OnReady += readyHandler;
                 }
 
+                person.OnRemotePlayerJoined += (p, pid) =>
+                {
+                    if (!_entities.ContainsKey(pid))
+                    {
+                        SpawnEntity(pid, Color.gray, $"P{pid}");
+                        Log($"Remote player {pid} joined");
+                    }
+                };
+                person.OnRemotePlayerLeft += (p, pid) =>
+                {
+                    DestroyEntity(pid);
+                    Log($"Remote player {pid} left");
+                };
+
                 person.OnFrameSyncStart += (p, data) => Log($"[{slot.inputMode}] Syncing!");
                 person.OnFrame += (p, frame) =>
                 {

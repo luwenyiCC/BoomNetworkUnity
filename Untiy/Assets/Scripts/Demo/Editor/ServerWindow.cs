@@ -7,6 +7,7 @@ namespace BoomNetworkDemo.Editor
     public class ServerWindow : EditorWindow
     {
         [SerializeField] private string _serverPath = "/Users/boom/Demo/BoomNetwork/svr";
+        [SerializeField] private string _configFile = "cmd/framesync/config.yaml";
         [SerializeField] private string _addr = ":9000";
         [SerializeField] private string _proto = "tcp";
         [SerializeField] private int _ppr = 2;
@@ -21,6 +22,7 @@ namespace BoomNetworkDemo.Editor
         {
             EditorGUILayout.LabelField("Server Config", EditorStyles.boldLabel);
             _serverPath = EditorGUILayout.TextField("Server Path", _serverPath);
+            _configFile = EditorGUILayout.TextField("Config File", _configFile);
 
             EditorGUILayout.BeginHorizontal();
             _addr = EditorGUILayout.TextField("Address", _addr);
@@ -59,7 +61,9 @@ namespace BoomNetworkDemo.Editor
 
             // 快速复制命令
             EditorGUILayout.LabelField("Manual Command", EditorStyles.boldLabel);
-            var cmd = $"cd {_serverPath} && go run ./cmd/framesync/ -addr={_addr} -proto={_proto} -ppr={_ppr}";
+            var cmd = string.IsNullOrEmpty(_configFile)
+                ? $"cd {_serverPath} && go run ./cmd/framesync/ -addr={_addr} -proto={_proto} -ppr={_ppr}"
+                : $"cd {_serverPath} && go run ./cmd/framesync/ -config={_configFile}";
             EditorGUILayout.SelectableLabel(cmd, EditorStyles.textField, GUILayout.Height(20));
 
             if (GUILayout.Button("Copy Command"))
@@ -71,7 +75,9 @@ namespace BoomNetworkDemo.Editor
 
         void OpenTerminalWithServer()
         {
-            var cmd = $"cd {_serverPath} && go run ./cmd/framesync/ -addr={_addr} -proto={_proto} -ppr={_ppr}";
+            var cmd = string.IsNullOrEmpty(_configFile)
+                ? $"cd {_serverPath} && go run ./cmd/framesync/ -addr={_addr} -proto={_proto} -ppr={_ppr}"
+                : $"cd {_serverPath} && go run ./cmd/framesync/ -config={_configFile}";
 
             // macOS: 打开 Terminal.app 执行命令
             var script = $"tell application \"Terminal\" to do script \"{cmd}\"";

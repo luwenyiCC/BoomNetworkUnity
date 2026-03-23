@@ -104,8 +104,7 @@ namespace BoomNetworkDemo
             _frameSync.OnError += err => Log($"Error: {err}");
             _roomClient.OnError += err => Log($"Room Error: {err}");
 
-            // 快照桥接
-            _frameSync.SnapshotInterval = 100; // 每 100 帧上传一次（5 秒 @20fps）
+            // 快照桥接（SnapshotInterval 由服务器通过 StartFrameSync 下发，不再硬编码）
             _frameSync.OnTakeSnapshot = () => TakeSnapshot?.Invoke();
             _frameSync.OnLoadSnapshot = data => LoadSnapshot?.Invoke(data);
 
@@ -145,11 +144,30 @@ namespace BoomNetworkDemo
 
         void HandleReconnectResponse(Message msg)
         {
-            // ReconnectRsp 新格式: [Success:1][RoomId:4][ServerFrame:4][SnapshotFrame:4][SnapshotData:N]
-            var (success, roomId, serverFrame, snapshotFrame, snapshotData) =
-                SnapshotCodec.DecodeReconnectRspWithSnapshot(msg.DataSpan);
+            // ReconnectRsp: [Result:1][RoomId:4][ServerFrame:4][SnapshotFrame:4][SnapshotData:N]
+            var (result, roomId, serverFrame, snapshotFrame, snapshotData) =
+                SnapshotCodec.DecodeReconnectRsp(msg.DataSpan);
 
-            if (success)
+            if (result == ReconnectResult.BufferStale)
+            {
+                // 帧缓冲区过期 → 降级到快照重连（发 lastFrame=0）
+                Log($"Buffer stale (serverFrame={serverFrame}), retrying with snapshot path...");
+                var data = new byte[4];
+                BitConverter.GetBytes(PlayerId).CopyTo(data, 0);
+                _session.SendAsync(FrameSyncCmd.Reconnect, data, 10000,
+                    onResponse: HandleReconnectResponse,
+                    onTimeout: err =>
+                    {
+                        Log($"Snapshot reconnect timeout: {err}. Fresh connect.");
+                        ClearIdentity();
+                        State = PersonState.Connected;
+                        OnConnected?.Invoke(this);
+                    }
+                );
+                return;
+            }
+
+            if (result == ReconnectResult.Success)
             {
                 RoomId = roomId;
 

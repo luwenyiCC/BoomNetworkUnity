@@ -334,12 +334,11 @@ namespace BoomNetworkDemo
                 person.OnDisconnected += p => Log($"[{slot.inputMode}] Lost connection");
 
                 person.TakeSnapshot = () => TakeWorldSnapshot();
-                // Demo01 简化策略: 不加载快照到 Entity。
-                // 原因: 同进程两个 Person 的补帧和 live 帧交错，帧号去重无法正确区分，
-                // 加载快照后补帧会被去重跳过，导致位置卡在快照时刻。
-                // 正确的快照+补帧重放属于 Demo02（预测模式）的范畴。
-                // 这里的做法: 不加载快照，Blue 位置正确（从未断线），Green 位置接近正确。
-                person.LoadSnapshot = data => Log($"Snapshot received ({data?.Length ?? 0} bytes, not applied in Demo01)");
+                person.LoadSnapshot = data =>
+                {
+                    LoadWorldSnapshot(data);
+                    Log($"Snapshot loaded ({data?.Length ?? 0} bytes, {_entities.Count} entities restored)");
+                };
             }
 
             person.Connect(config);

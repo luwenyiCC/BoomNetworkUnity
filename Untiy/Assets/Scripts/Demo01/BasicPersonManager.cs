@@ -326,7 +326,10 @@ namespace BoomNetworkDemo
                 person.OnDisconnected += p => Log($"[{slot.inputMode}] Lost connection");
 
                 person.TakeSnapshot = () => TakeWorldSnapshot();
-                person.LoadSnapshot = data => LoadWorldSnapshot(data);
+                // Demo01 传统模式: 重连时不用快照恢复 Entity 位置。
+                // 服务器会补发帧，OnAuthorityFrame 自然追回正确位置。
+                // 快照只上传给服务器（供其他客户端重连用），不本地加载。
+                person.LoadSnapshot = data => Log($"Snapshot received ({data?.Length ?? 0} bytes, skipped in traditional mode)");
             }
 
             person.Connect(config);

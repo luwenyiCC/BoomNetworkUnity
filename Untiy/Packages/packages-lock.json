@@ -5,7 +5,7 @@
       "depth": 0,
       "source": "git",
       "dependencies": {},
-      "hash": "8c6ea443db3464180be7286ddde4321e018c03f1"
+      "hash": "d40a0c058c76f1bb843749beb75fb4b43bcebfd4"
     },
     "com.boxqkrtm.ide.cursor": {
       "version": "https://github.com/boxqkrtm/com.unity.ide.cursor.git",

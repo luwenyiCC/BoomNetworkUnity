@@ -246,15 +246,19 @@ namespace BoomNetworkDemo
         {
             if (State != PersonState.Connected) return;
 
-            _roomClient.JoinRoom(targetRoomId, (pid, rid) =>
+            _roomClient.JoinRoom(targetRoomId, (pid, rid, existingPlayers) =>
             {
                 PlayerId = pid;
                 RoomId = rid;
                 _connMgr.SetPlayerId(pid);
                 State = PersonState.InRoom;
-                Log($"Joined room {rid} as Player {pid}");
+                Log($"Joined room {rid} as Player {pid} (existing: [{string.Join(",", existingPlayers)}])");
+
+                // 通知上层已有玩家（用 OnRemotePlayerJoined 复用同一事件）
+                foreach (var existingPid in existingPlayers)
+                    OnRemotePlayerJoined?.Invoke(this, existingPid);
+
                 OnJoinedRoom?.Invoke(this);
-                // Fix #3: 首次加入也触发 OnReady
                 OnReady?.Invoke(this);
             });
         }

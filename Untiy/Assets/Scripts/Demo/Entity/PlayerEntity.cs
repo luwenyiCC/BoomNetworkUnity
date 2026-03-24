@@ -87,6 +87,19 @@ namespace BoomNetworkDemo
         public static float WorldHalfWidth = 8f;
         public static float WorldHalfHeight = 5f;
 
+        /// <summary>当前朝向角度（度），用于快照序列化</summary>
+        public float FacingAngle => _lastDir.sqrMagnitude > 0.01f
+            ? Mathf.Atan2(_lastDir.y, _lastDir.x) * Mathf.Rad2Deg
+            : transform.eulerAngles.z;
+
+        /// <summary>从快照恢复朝向</summary>
+        public void SetFacing(float angleDeg)
+        {
+            float rad = angleDeg * Mathf.Deg2Rad;
+            _lastDir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
+            transform.rotation = Quaternion.Euler(0, 0, angleDeg);
+        }
+
         public void ApplyMove(Vector2 dir, float delta)
         {
             transform.position += new Vector3(dir.x, dir.y, 0) * delta;

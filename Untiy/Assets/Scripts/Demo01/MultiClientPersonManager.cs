@@ -494,16 +494,19 @@ namespace BoomNetworkDemo
             sortedKeys.Sort();
 
             int count = sortedKeys.Count;
-            var buf = new byte[2 + count * 12];
+            var buf = new byte[2 + count * 16];
             buf[0] = (byte)(count & 0xFF);
             buf[1] = (byte)((count >> 8) & 0xFF);
             int offset = 2;
             foreach (var key in sortedKeys)
             {
-                var pos = _entities[key] != null ? (Vector2)_entities[key].transform.position : Vector2.zero;
-                BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), key); offset += 4;
+                var e = _entities[key];
+                var pos = e != null ? (Vector2)e.transform.position : Vector2.zero;
+                float angle = e != null ? e.FacingAngle : 0f;
+                BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), key);   offset += 4;
                 BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), pos.x); offset += 4;
                 BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), pos.y); offset += 4;
+                BitConverter.TryWriteBytes(new Span<byte>(buf, offset, 4), angle); offset += 4;
             }
             return buf;
         }
@@ -513,14 +516,18 @@ namespace BoomNetworkDemo
             if (data == null || data.Length < 2) return;
             int count = data[0] | (data[1] << 8);
             int offset = 2;
-            for (int i = 0; i < count && offset + 12 <= data.Length; i++)
+            for (int i = 0; i < count && offset + 16 <= data.Length; i++)
             {
-                int pid = BitConverter.ToInt32(data, offset); offset += 4;
-                float x = BitConverter.ToSingle(data, offset); offset += 4;
-                float y = BitConverter.ToSingle(data, offset); offset += 4;
+                int pid   = BitConverter.ToInt32(data, offset);  offset += 4;
+                float x   = BitConverter.ToSingle(data, offset); offset += 4;
+                float y   = BitConverter.ToSingle(data, offset); offset += 4;
+                float ang = BitConverter.ToSingle(data, offset); offset += 4;
                 if (!_entities.ContainsKey(pid)) SpawnEntity(pid, Color.gray, $"P{pid}");
                 if (_entities.TryGetValue(pid, out var entity) && entity != null)
+                {
                     entity.transform.position = new Vector3(x, y, 0);
+                    entity.SetFacing(ang);
+                }
             }
 
             // 重置帧去重计数器：世界状态已回滚到快照帧，

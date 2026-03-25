@@ -245,7 +245,7 @@ namespace BoomNetworkDemo
 
             float dt = 1f / 20f; // 服务器帧间隔
 
-            for (int i = 0; i < frame.InputCount; i++)
+            for (int i = 0; i < frame.Inputs.Length; i++)
             {
                 ref var input = ref frame.Inputs[i];
                 int pid = input.PlayerId;
@@ -261,8 +261,8 @@ namespace BoomNetworkDemo
                 var dir = Vector2.zero;
                 if (input.DataLength >= 8)
                 {
-                    dir.x = BitConverter.ToSingle(input.Data, input.DataOffset);
-                    dir.y = BitConverter.ToSingle(input.Data, input.DataOffset + 4);
+                    dir.x = BitConverter.ToSingle(input.Data, 0);
+                    dir.y = BitConverter.ToSingle(input.Data, 4);
                 }
 
                 // 判断是否是本 slot 管理的实体

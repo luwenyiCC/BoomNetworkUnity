@@ -49,6 +49,12 @@ namespace BoomNetworkDemo.EntitySync
         /// </summary>
         public float WarpSnapThreshold = 2f;
 
+        // ===== 世界边界环绕（可选） =====
+        /// <summary>启用后 Dead Reckoning 外推会自动 wrap，避免远端越界漂移</summary>
+        public bool UseWorldWrap;
+        public float WorldHalfWidth = 8f;
+        public float WorldHalfHeight = 5f;
+
         // ===== 统计 =====
         public int CorrectionCount { get; private set; }
 
@@ -146,7 +152,20 @@ namespace BoomNetworkDemo.EntitySync
             // ① Dead Reckoning：帧间外推 logical
             DeadReckoning.Extrapolate(ref LogicalPosition, ref LogicalRotation, LogicalVelocity, dt);
 
-            // ② 环绕/瞬移检测：visual→logical 距离过大时直接 snap
+            // ② 世界边界环绕：防止外推越界
+            if (UseWorldWrap)
+            {
+                var prevLogical = _visualPos; // wrap 前记录 visual 侧的参考
+                WrapLogicalPosition();
+                // logical 发生了 wrap 跳变 → visual 也必须跟过去
+                if (Vector2.Distance(prevLogical, LogicalPosition) > WarpSnapThreshold)
+                {
+                    _visualPos = LogicalPosition;
+                    _visualRot = LogicalRotation;
+                }
+            }
+
+            // ③ 瞬移检测（非 wrap 场景：传送技能等）
             if (Vector2.Distance(_visualPos, LogicalPosition) > WarpSnapThreshold)
             {
                 _visualPos = LogicalPosition;
@@ -154,7 +173,7 @@ namespace BoomNetworkDemo.EntitySync
             }
             else
             {
-                // ③ Inertia：visual 平滑追 logical
+                // ④ Inertia：visual 平滑追 logical
                 Inertia.Smooth(ref _visualPos, ref _visualRot, LogicalPosition, LogicalRotation, dt);
             }
 
@@ -179,6 +198,19 @@ namespace BoomNetworkDemo.EntitySync
         public void SetVelocity(Vector2 vel)
         {
             LogicalVelocity = vel;
+        }
+
+        /// <summary>世界边界环绕（与 PlayerEntity.WrapPosition 逻辑一致）</summary>
+        void WrapLogicalPosition()
+        {
+            float w = WorldHalfWidth + 0.5f;
+            float h = WorldHalfHeight + 0.5f;
+
+            if (LogicalPosition.x > w) LogicalPosition.x = -w;
+            else if (LogicalPosition.x < -w) LogicalPosition.x = w;
+
+            if (LogicalPosition.y > h) LogicalPosition.y = -h;
+            else if (LogicalPosition.y < -h) LogicalPosition.y = h;
         }
     }
 }

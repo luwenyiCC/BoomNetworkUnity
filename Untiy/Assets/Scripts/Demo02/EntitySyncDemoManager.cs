@@ -34,6 +34,9 @@ namespace BoomNetworkDemo
             var entity = PlayerEntity.Spawn(pid, color, label);
             var sync = entity.gameObject.AddComponent<NetworkTransformSync>();
             sync.EntityId = pid;
+            sync.UseWorldWrap = true;
+            sync.WorldHalfWidth = PlayerEntity.WorldHalfWidth;
+            sync.WorldHalfHeight = PlayerEntity.WorldHalfHeight;
             sync.InitVisual((Vector2)entity.transform.position, entity.FacingAngle);
             _syncs[pid] = sync;
             return entity;

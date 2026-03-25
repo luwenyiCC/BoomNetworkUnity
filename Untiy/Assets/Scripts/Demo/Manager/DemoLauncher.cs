@@ -65,27 +65,14 @@ namespace BoomNetworkDemo
 
             GUILayout.Space(8);
 
-            // Demo02 - Entity Authority Sync
-            GUILayout.BeginVertical(_boxStyle);
-            if (GUILayout.Button("Demo02 - Entity Authority Sync", _btnStyle))
-                SceneManager.LoadScene("Demo02-Prediction");
-            GUILayout.Label(
-                "Entity-level authority + Dead Reckoning + inertia smoothing.\n" +
-                "Local input = instant. Remote entities = smooth correction.\n" +
-                "Use Network Simulation in Server Window to test with latency.",
-                _descStyle);
-            GUILayout.EndVertical();
-
-            GUILayout.Space(8);
-
             // Demo03 - Entity Sync Multi-Client
             GUILayout.BeginVertical(_boxStyle);
             if (GUILayout.Button("Demo03 - Entity Sync (Multi-Client)", _btnStyle))
                 SceneManager.LoadScene("Demo03-EntitySync");
             GUILayout.Label(
-                "ParrelSync / 两台电脑，每个编辑器一个真实玩家。\n" +
+                "ParrelSync multi-editor, each editor 1 real player.\n" +
                 "Entity Authority Sync + Dead Reckoning + Network Simulation.\n" +
-                "测试真实网络延迟下的预测纠偏效果。",
+                "Self-authority: own input = instant, remote = smooth correction.",
                 _descStyle);
             GUILayout.EndVertical();
 

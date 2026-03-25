@@ -15,7 +15,7 @@ namespace BoomNetworkDemo.Editor
             "Assets/Scenes/Launcher.unity",
             "Assets/Scenes/Demo01-Basic.unity",
             "Assets/Scenes/Demo01.1-MultiClient.unity",
-            "Assets/Scenes/Demo02-Prediction.unity",
+            "Assets/Scenes/Demo03-EntitySync.unity",
         };
 
         static DemoSceneSetup()

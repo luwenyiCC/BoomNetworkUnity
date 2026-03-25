@@ -3,8 +3,6 @@ using System;
 using System.Collections.Generic;
 using Sirenix.OdinInspector;
 using BoomNetwork.Core.FrameSync;
-using BoomNetwork.Core.Prediction;
-
 namespace BoomNetworkDemo
 {
     public class PersonManager : MonoBehaviour
@@ -307,19 +305,6 @@ namespace BoomNetworkDemo
         private float _inputSendAccumulator; // 输入发送节流器
         private const float INPUT_SEND_INTERVAL_MS = 50f; // 20fps
 
-        // --- 预测回滚 ---
-        private DemoSimulation _simulation;
-        private PredictionManager _prediction;
-        private bool _predictionEnabled;
-        [TitleGroup("Config")]
-        [LabelWidth(120)]
-        public bool enablePrediction = false;
-        [TitleGroup("Config")]
-        [LabelWidth(120), ShowIf("enablePrediction")]
-        [Tooltip("渲染追逐逻辑位置的速度。越大越快到位，0=立刻到位（无平滑）")]
-        [Range(0f, 30f)]
-        public float smoothSpeed = 15f;
-
         void Awake()
         {
             // 绑定 slot → manager 引用
@@ -361,40 +346,14 @@ namespace BoomNetworkDemo
                     if (hasInput)
                     {
                         EncodeInput(dir, _inputBuf);
-
-                        if (_predictionEnabled && slot.person == _authorityPerson)
-                        {
-                            slot.person.PredictWithInput(dt, _inputBuf);
-                        }
-                        else
-                        {
-                            slot.person.SendInput(_inputBuf);
-                        }
+                        slot.person.SendInput(_inputBuf);
                     }
                 }
 
                 // 更新面板显示
                 slot.state = slot.person.State.ToString();
                 slot.pid = slot.person.PlayerId > 0 ? slot.person.PlayerId.ToString() : "-";
-                slot.frame = _predictionEnabled && _prediction != null && slot.person == _authorityPerson
-                    ? $"{_prediction.PredictedFrame}({_prediction.ConfirmedFrame})"
-                    : slot.person.FrameNumber.ToString();
-            }
-
-            // 预测模式: 从 DemoSimulation 逻辑位置渲染 Entity（带平滑）
-            if (_predictionEnabled && _simulation != null)
-            {
-                _simulation.ForEachPosition((pid, pos) =>
-                {
-                    if (_entities.TryGetValue(pid, out var entity) && entity != null)
-                    {
-                        var target = new Vector3(pos.x, pos.y, 0);
-                        if (smoothSpeed > 0)
-                            entity.transform.position = Vector3.Lerp(entity.transform.position, target, smoothSpeed * Time.deltaTime);
-                        else
-                            entity.transform.position = target;
-                    }
-                });
+                slot.frame = slot.person.FrameNumber.ToString();
             }
 
             UpdateSyncStatus();
@@ -610,13 +569,6 @@ namespace BoomNetworkDemo
             {
                 var authSlot = persons.Find(s => s.person == _authorityPerson);
                 Log($"Authority migrated to [{authSlot?.inputMode}] P{_authorityPerson.PlayerId}");
-                SetupPrediction(_authorityPerson);
-            }
-
-            // 旧 authority 失效时清理预测
-            if (oldAuth != null && oldAuth != _authorityPerson)
-            {
-                ClearPrediction(oldAuth);
             }
         }
 
@@ -673,73 +625,6 @@ namespace BoomNetworkDemo
             Debug.Log($"[PersonMgr] {msg}");
         }
 
-        // ===================== Prediction =====================
-
-        void SetupPrediction(Person person)
-        {
-            if (!enablePrediction) { _predictionEnabled = false; return; }
-
-            // 从服务器的 FrameSyncInitData 获取帧间隔，不硬编码
-            var initData = person.GetFrameSyncInitData();
-            float serverFrameIntervalMs = initData.HasValue ? initData.Value.FrameInterval : 50f;
-            float serverFrameIntervalSec = serverFrameIntervalMs / 1000f;
-
-            _simulation = new DemoSimulation
-            {
-                MoveSpeed = moveSpeed,
-                FrameInterval = serverFrameIntervalSec,
-            };
-
-            // 初始化逻辑位置（从当前 Entity 位置）
-            foreach (var kv in _entities)
-            {
-                if (kv.Value != null)
-                    _simulation.SetPosition(kv.Key, (Vector2)kv.Value.transform.position);
-            }
-
-            // 获取房间内所有玩家 ID
-            var playerIds = new List<int>();
-            foreach (var slot in persons)
-            {
-                if (slot.person != null && slot.person.PlayerId > 0 &&
-                    (slot.person.State == PersonState.Syncing || slot.person.State == PersonState.InRoom))
-                    playerIds.Add(slot.person.PlayerId);
-            }
-
-            _prediction = new PredictionManager(_simulation);
-            _prediction.MaxPredictionFrames = 8;
-            _prediction.FrameIntervalMs = serverFrameIntervalMs;
-            _prediction.OnRollback += (frame, count) =>
-            {
-                Log($"Rollback! from={frame} replay={count}");
-            };
-            _prediction.OnFrameSimulated += (frame, isRollback) =>
-            {
-                // 预测或回滚执行帧后，确保新玩家有 Entity
-                _simulation.ForEachPosition((pid, pos) =>
-                {
-                    if (!_entities.ContainsKey(pid))
-                        SpawnEntity(pid, Color.gray, $"P{pid}");
-                });
-            };
-
-            _prediction.Start(person.PlayerId, playerIds);
-
-            // 绑定到 FrameSyncClient
-            person.SetPrediction(_prediction);
-            _predictionEnabled = true;
-
-            Log($"Prediction enabled (maxAhead={_prediction.MaxPredictionFrames})");
-        }
-
-        void ClearPrediction(Person person)
-        {
-            person.ClearPrediction();
-            _prediction = null;
-            _simulation = null;
-            _predictionEnabled = false;
-        }
-
         // ===================== Snapshot =====================
 
         /// <summary>
@@ -792,12 +677,6 @@ namespace BoomNetworkDemo
             }
             Log($"Snapshot loaded: {count} entities restored");
         }
-
-        // --- 供 HUD 读取 ---
-        public (int ahead, int totalRollbacks, int totalRollbackFrames)? PredictionStats =>
-            _prediction != null
-                ? (_prediction.AheadFrames, _prediction.TotalRollbacks, _prediction.TotalRollbackFrames)
-                : null;
 
         Color GetSyncColor()
         {

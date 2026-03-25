@@ -92,7 +92,6 @@ namespace BoomNetworkDemo
         // ===================== Frame Sync (纯代理) =====================
 
         public void SendInput(byte[] data) => _client?.SendInput(data);
-        public void PredictWithInput(float deltaTimeMs, byte[] data) => _client?.PredictWithInput(deltaTimeMs, data);
 
         // ===================== Entity Sync (纯代理) =====================
 
@@ -103,18 +102,6 @@ namespace BoomNetworkDemo
         // ===================== Test =====================
 
         public void SimulateNetworkDrop() => _client?.SimulateNetworkDrop();
-
-        // ===================== Prediction (纯代理) =====================
-
-        public void SetPrediction(BoomNetwork.Core.Prediction.PredictionManager prediction)
-        {
-            if (_client != null) _client.Prediction = prediction;
-        }
-
-        public void ClearPrediction()
-        {
-            if (_client != null) _client.Prediction = null;
-        }
 
         // ===================== Event Wiring (一次) =====================
 

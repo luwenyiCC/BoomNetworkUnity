@@ -4,6 +4,7 @@
 // Upgrade pause: game freezes when any player is choosing, all clients see it.
 
 using UnityEngine;
+using BoomNetwork.Client.FrameSync;
 using BoomNetwork.Core.FrameSync;
 using BoomNetwork.Unity;
 
@@ -20,7 +21,9 @@ namespace BoomNetwork.Samples.VampireSurvivors
         float _sendTimer;
         int _localSlot = -1;
         bool _syncing;
-        bool _snapshotLoaded; // true if LoadSnapshot was called before OnFrameSyncStart
+        bool _snapshotLoaded;
+        bool _desyncDetected;
+        uint _desyncFrame;
         byte _pendingUpgradeChoice;
 
         // Track which player IDs are in the room (for fresh-game init)
@@ -47,6 +50,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             c.OnPlayerLeft += OnPlayerLeft;
             c.OnTakeSnapshot = TakeSnapshot;
             c.OnLoadSnapshot = LoadSnapshot;
+            c.OnDesyncDetected += OnDesync;
 
             _network.QuickStart();
         }
@@ -159,6 +163,20 @@ namespace BoomNetwork.Samples.VampireSurvivors
         {
             _sim.Tick(frame);
             if (_renderer != null) _renderer.SyncVisuals();
+
+            // Desync detection: send state hash to server every frame
+            uint hash = _sim.State.ComputeHash();
+            _network.Client.SendFrameHash(frame.FrameNumber, hash);
+        }
+
+        void OnDesync(FrameHashMismatch mismatch)
+        {
+            _desyncDetected = true;
+            _desyncFrame = mismatch.FrameNumber;
+            string detail = $"DESYNC at frame {mismatch.FrameNumber}:";
+            foreach (var (pid, h) in mismatch.PlayerHashes)
+                detail += $"\n  P{pid}: 0x{h:X8}";
+            Debug.LogError($"[VS] {detail}");
         }
 
         byte[] TakeSnapshot() => VSSnapshot.Serialize(_sim.State);
@@ -187,6 +205,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             if (!_syncing) return;
             CacheStyles();
             DrawStatusHUD();
+            DrawDesyncOverlay();
             DrawPauseOverlay();
             DrawUpgradePanel();
         }
@@ -247,7 +266,17 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 $"{aliveEnemies} enemies, 0 extra bandwidth (pure FrameSync)", _smallStyle);
         }
 
-        /// <summary>Show PAUSED overlay when another player is upgrading (not us).</summary>
+        void DrawDesyncOverlay()
+        {
+            if (!_desyncDetected) return;
+            float w = 400, h = 60;
+            float px = (Screen.width - w) / 2f;
+            float py = Screen.height * 0.2f;
+            GUI.Box(new Rect(px, py, w, h), "", _boxStyle);
+            GUI.Label(new Rect(px, py, w, h),
+                $"<color=red><b>DESYNC DETECTED</b></color>\nFrame {_desyncFrame} — State hashes differ. Game paused.", _pauseStyle);
+        }
+
         void DrawPauseOverlay()
         {
             // Find who's upgrading

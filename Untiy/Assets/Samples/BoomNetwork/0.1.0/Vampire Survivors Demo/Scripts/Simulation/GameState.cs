@@ -301,5 +301,66 @@ namespace BoomNetwork.Samples.VampireSurvivors
         {
             switch (t) { case EnemyType.Bat: return BatDamage; case EnemyType.SkeletonMage: return MageDamage; default: return ZombieDamage; }
         }
+
+        /// <summary>
+        /// Compute a deterministic hash of the full game state.
+        /// Used for desync detection — server compares hashes from all clients.
+        /// FNV-1a on key state fields (all int/FInt.Raw, no float).
+        /// </summary>
+        public uint ComputeHash()
+        {
+            uint h = 2166136261u; // FNV offset basis
+
+            h = Fnv(h, FrameNumber);
+            h = Fnv(h, RngState);
+            h = Fnv(h, (uint)WaveNumber);
+            h = Fnv(h, WaveSpawnTimer);
+            h = Fnv(h, WaveSpawnRemaining);
+
+            for (int i = 0; i < MaxPlayers; i++)
+            {
+                ref var p = ref Players[i];
+                h = Fnv(h, p.IsActive ? 1u : 0u);
+                h = Fnv(h, p.IsAlive ? 1u : 0u);
+                h = Fnv(h, (uint)p.PosX.Raw);
+                h = Fnv(h, (uint)p.PosZ.Raw);
+                h = Fnv(h, (uint)p.Hp);
+                h = Fnv(h, (uint)p.Xp);
+                h = Fnv(h, (uint)p.Level);
+                h = Fnv(h, p.InvincibilityFrames);
+                h = Fnv(h, (uint)p.KillCount);
+                h = Fnv(h, p.PendingLevelUp ? 1u : 0u);
+            }
+
+            for (int i = 0; i < MaxEnemies; i++)
+            {
+                ref var e = ref Enemies[i];
+                if (!e.IsAlive) continue;
+                h = Fnv(h, (uint)i);
+                h = Fnv(h, (uint)e.PosX.Raw);
+                h = Fnv(h, (uint)e.PosZ.Raw);
+                h = Fnv(h, (uint)e.Hp);
+            }
+
+            for (int i = 0; i < MaxProjectiles; i++)
+            {
+                ref var p = ref Projectiles[i];
+                if (!p.IsAlive) continue;
+                h = Fnv(h, (uint)i);
+                h = Fnv(h, (uint)p.PosX.Raw);
+                h = Fnv(h, (uint)p.PosZ.Raw);
+            }
+
+            return h;
+        }
+
+        static uint Fnv(uint hash, uint value)
+        {
+            hash ^= value & 0xFF; hash *= 16777619u;
+            hash ^= (value >> 8) & 0xFF; hash *= 16777619u;
+            hash ^= (value >> 16) & 0xFF; hash *= 16777619u;
+            hash ^= (value >> 24) & 0xFF; hash *= 16777619u;
+            return hash;
+        }
     }
 }

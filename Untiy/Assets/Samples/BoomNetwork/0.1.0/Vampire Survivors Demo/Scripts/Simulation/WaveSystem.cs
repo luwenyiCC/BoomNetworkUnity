@@ -1,7 +1,9 @@
-// BoomNetwork VampireSurvivors Demo — Wave Spawner
+// BoomNetwork VampireSurvivors Demo — Wave Spawner (Phase 2)
 //
-// Spawns zombies at arena edges in escalating waves.
-// All RNG through DeterministicRng for cross-client determinism.
+// Escalating waves with mixed enemy types:
+//   Wave 1-2: Zombies only
+//   Wave 3+: Bats introduced (30%)
+//   Wave 5+: Skeleton Mages introduced (20%)
 
 using System;
 
@@ -26,41 +28,56 @@ namespace BoomNetwork.Samples.VampireSurvivors
                     state.WaveSpawnTimer--;
                     return;
                 }
-                // Start new wave
                 state.WaveNumber++;
                 state.WaveSpawnRemaining = (uint)(BaseEnemyCount + state.WaveNumber * EnemiesPerWave);
                 state.WaveSpawnTimer = SpawnIntervalFrames;
                 return;
             }
 
-            // Spawn timer
             if (state.WaveSpawnTimer > 0)
             {
                 state.WaveSpawnTimer--;
                 return;
             }
 
-            // Spawn one enemy
             int slot = state.AllocEnemy();
             if (slot < 0)
             {
-                // Pool full, skip this spawn tick
                 state.WaveSpawnTimer = SpawnIntervalFrames;
                 return;
             }
 
-            SpawnZombie(state, slot);
+            SpawnEnemy(state, slot);
             state.WaveSpawnRemaining--;
             state.WaveSpawnTimer = SpawnIntervalFrames;
         }
 
-        static void SpawnZombie(GameState state, int slot)
+        static void SpawnEnemy(GameState state, int slot)
         {
             ref var e = ref state.Enemies[slot];
             e.IsAlive = true;
-            e.Hp = GameState.ZombieHp + state.WaveNumber / 3; // scale HP with waves
+            e.BehaviorTimer = 0;
+            e.DirX = 0;
+            e.DirZ = 0;
 
-            // Pick a random edge (0=top, 1=bottom, 2=left, 3=right)
+            // Determine enemy type based on wave
+            e.Type = PickEnemyType(state);
+
+            switch (e.Type)
+            {
+                case EnemyType.Zombie:
+                    e.Hp = GameState.ZombieHp + state.WaveNumber / 3;
+                    break;
+                case EnemyType.Bat:
+                    e.Hp = GameState.BatHp + state.WaveNumber / 4;
+                    break;
+                case EnemyType.SkeletonMage:
+                    e.Hp = GameState.MageHp + state.WaveNumber / 2;
+                    e.BehaviorTimer = (uint)DeterministicRng.RangeInt(ref state.RngState, 0, (int)GameState.MageFireCooldown);
+                    break;
+            }
+
+            // Spawn at random arena edge
             int edge = DeterministicRng.RangeInt(ref state.RngState, 0, 4);
             float along = DeterministicRng.Range(ref state.RngState,
                 -GameState.ArenaHalfSize, GameState.ArenaHalfSize);
@@ -75,6 +92,28 @@ namespace BoomNetwork.Samples.VampireSurvivors
             }
 
             e.TargetPlayerId = state.FindNearestPlayer(e.PosX, e.PosZ);
+        }
+
+        static EnemyType PickEnemyType(GameState state)
+        {
+            int roll = DeterministicRng.RangeInt(ref state.RngState, 0, 100);
+
+            if (state.WaveNumber >= 5)
+            {
+                // 50% Zombie, 30% Bat, 20% Mage
+                if (roll < 20) return EnemyType.SkeletonMage;
+                if (roll < 50) return EnemyType.Bat;
+                return EnemyType.Zombie;
+            }
+
+            if (state.WaveNumber >= 3)
+            {
+                // 70% Zombie, 30% Bat
+                if (roll < 30) return EnemyType.Bat;
+                return EnemyType.Zombie;
+            }
+
+            return EnemyType.Zombie;
         }
     }
 }

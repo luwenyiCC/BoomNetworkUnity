@@ -1,9 +1,9 @@
-// BoomNetwork VampireSurvivors Demo — Master 3D Renderer
+// BoomNetwork VampireSurvivors Demo — Master 3D Renderer (Phase 2)
 //
-// Creates all visual objects programmatically (zero external assets).
-// Object pools for enemies, projectiles, and gems.
-// Reads GameState each frame and drives Transform positions.
+// Fixed orthographic top-down camera. Programmatic primitives.
+// Supports: 3 enemy types, 4 weapon visuals, lightning flashes, orbs.
 
+using System;
 using UnityEngine;
 
 namespace BoomNetwork.Samples.VampireSurvivors
@@ -14,36 +14,31 @@ namespace BoomNetwork.Samples.VampireSurvivors
         int _localSlot;
         bool _initialized;
 
-        // Camera
         Camera _cam;
-        const float CamHeight = 25f;
-        const float CamAngle = 55f;
 
-        // Materials (shared, created once)
-        Material _matPlayer;
-        Material _matEnemy;
-        Material _matKnife;
-        Material _matGem;
-        Material _matGround;
-        Material _matPlayerHit; // flash on invincibility
+        // Materials
+        Material _matPlayer, _matPlayerHit;
+        Material _matZombie, _matBat, _matMage;
+        Material _matKnife, _matBoneShard;
+        Material _matGem, _matGround;
+        Material _matOrb, _matLightning, _matHolyWater;
 
-        // Player pool
+        // Pools
         GameObject[] _playerObjs = new GameObject[GameState.MaxPlayers];
         Material[] _playerMats = new Material[GameState.MaxPlayers];
-
-        // Enemy pool
         GameObject[] _enemyPool = new GameObject[GameState.MaxEnemies];
-
-        // Projectile pool
+        Renderer[] _enemyRenderers = new Renderer[GameState.MaxEnemies];
         GameObject[] _projPool = new GameObject[GameState.MaxProjectiles];
-
-        // Gem pool
+        Renderer[] _projRenderers = new Renderer[GameState.MaxProjectiles];
         GameObject[] _gemPool = new GameObject[GameState.MaxGems];
 
-        // Ground
-        GameObject _ground;
+        // Orb pool: 4 players × 5 orbs = 20
+        const int TotalOrbs = GameState.MaxPlayers * PlayerState.MaxOrbs;
+        GameObject[] _orbPool = new GameObject[TotalOrbs];
 
-        // Player colors
+        // Lightning flash pool
+        GameObject[] _flashPool = new GameObject[GameState.MaxLightningFlashes];
+
         static readonly Color[] PlayerColors =
         {
             new Color(0.2f, 0.6f, 1f),
@@ -56,32 +51,40 @@ namespace BoomNetwork.Samples.VampireSurvivors
         {
             _state = state;
             _localSlot = localSlot;
-
             if (_initialized) return;
             _initialized = true;
 
             CreateMaterials();
-            CreateGround();
             CreateCamera();
+            CreateGround();
+            CreateLight();
             CreatePlayerPool();
             CreateEnemyPool();
             CreateProjectilePool();
             CreateGemPool();
-            CreateLight();
+            CreateOrbPool();
+            CreateFlashPool();
         }
 
         void CreateMaterials()
         {
-            // Try URP first, fallback to Standard
             var shader = Shader.Find("Universal Render Pipeline/Lit")
                       ?? Shader.Find("Standard");
 
             _matPlayer = new Material(shader) { color = PlayerColors[0] };
-            _matEnemy = new Material(shader) { color = new Color(0.9f, 0.2f, 0.15f) };
+            _matPlayerHit = new Material(shader) { color = new Color(1f, 0.5f, 0.5f, 0.7f) };
+            _matZombie = new Material(shader) { color = new Color(0.9f, 0.2f, 0.15f) };
+            _matBat = new Material(shader) { color = new Color(0.5f, 0.1f, 0.6f) };
+            _matMage = new Material(shader) { color = new Color(0.2f, 0.2f, 0.8f) };
             _matKnife = new Material(shader) { color = Color.white };
+            _matBoneShard = new Material(shader) { color = new Color(0.9f, 0.85f, 0.7f) };
             _matGem = new Material(shader) { color = new Color(0.3f, 1f, 0.5f) };
             _matGround = new Material(shader) { color = new Color(0.15f, 0.15f, 0.2f) };
-            _matPlayerHit = new Material(shader) { color = new Color(1f, 0.5f, 0.5f, 0.7f) };
+            _matOrb = new Material(shader) { color = new Color(0.4f, 0.7f, 1f) };
+            _matOrb.SetFloat("_Smoothness", 0.9f);
+            _matLightning = new Material(shader) { color = new Color(1f, 1f, 0.5f) };
+            _matLightning.EnableKeyword("_EMISSION");
+            _matHolyWater = new Material(shader) { color = new Color(0.3f, 0.5f, 1f, 0.5f) };
         }
 
         void CreateCamera()
@@ -91,12 +94,13 @@ namespace BoomNetwork.Samples.VampireSurvivors
             _cam = camObj.AddComponent<Camera>();
             _cam.clearFlags = CameraClearFlags.SolidColor;
             _cam.backgroundColor = new Color(0.05f, 0.05f, 0.1f);
-            _cam.fieldOfView = 60f;
-            _cam.nearClipPlane = 0.3f;
-            _cam.farClipPlane = 100f;
-            // Position will be updated in SyncVisuals to follow local player
+            _cam.orthographic = true;
+            _cam.orthographicSize = GameState.ArenaHalfSize + 2f;
+            _cam.nearClipPlane = 0.1f;
+            _cam.farClipPlane = 60f;
+            camObj.transform.position = new Vector3(0f, 40f, 0f);
+            camObj.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 
-            // Disable any existing main camera
             var mainCam = Camera.main;
             if (mainCam != null && mainCam != _cam)
                 mainCam.gameObject.SetActive(false);
@@ -104,36 +108,44 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
         void CreateGround()
         {
-            _ground = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            _ground.name = "VS_Ground";
-            _ground.transform.SetParent(transform);
+            var ground = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            ground.name = "VS_Ground";
+            ground.transform.SetParent(transform);
             float size = GameState.ArenaHalfSize * 2f;
-            _ground.transform.localScale = new Vector3(size, size, 1f);
-            _ground.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            _ground.transform.position = new Vector3(0f, -0.01f, 0f);
-            _ground.GetComponent<Renderer>().sharedMaterial = _matGround;
-            // Remove collider
-            var col = _ground.GetComponent<Collider>();
-            if (col != null) Destroy(col);
+            ground.transform.localScale = new Vector3(size, size, 1f);
+            ground.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            ground.transform.position = new Vector3(0f, -0.01f, 0f);
+            ground.GetComponent<Renderer>().sharedMaterial = _matGround;
+            DestroyCollider(ground);
 
-            // Arena border lines (thin cubes)
+            // Arena border
             float hs = GameState.ArenaHalfSize;
-            CreateBorderLine(0f, 0f, hs, size + 0.2f, 0.1f, 0.05f);      // top
-            CreateBorderLine(0f, 0f, -hs, size + 0.2f, 0.1f, 0.05f);     // bottom
-            CreateBorderLine(-hs, 0f, 0f, 0.05f, 0.1f, size + 0.2f);     // left
-            CreateBorderLine(hs, 0f, 0f, 0.05f, 0.1f, size + 0.2f);      // right
+            MakeLine(0, 0, hs, size + 0.2f, 0.1f, 0.05f);
+            MakeLine(0, 0, -hs, size + 0.2f, 0.1f, 0.05f);
+            MakeLine(-hs, 0, 0, 0.05f, 0.1f, size + 0.2f);
+            MakeLine(hs, 0, 0, 0.05f, 0.1f, size + 0.2f);
         }
 
-        void CreateBorderLine(float x, float y, float z, float sx, float sy, float sz)
+        void MakeLine(float x, float y, float z, float sx, float sy, float sz)
         {
-            var line = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            line.name = "VS_Border";
-            line.transform.SetParent(transform);
-            line.transform.position = new Vector3(x, y, z);
-            line.transform.localScale = new Vector3(sx, sy, sz);
-            line.GetComponent<Renderer>().sharedMaterial = _matGem; // green border
-            var col = line.GetComponent<Collider>();
-            if (col != null) Destroy(col);
+            var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            obj.name = "VS_Border";
+            obj.transform.SetParent(transform);
+            obj.transform.position = new Vector3(x, y, z);
+            obj.transform.localScale = new Vector3(sx, sy, sz);
+            obj.GetComponent<Renderer>().sharedMaterial = _matGem;
+            DestroyCollider(obj);
+        }
+
+        void CreateLight()
+        {
+            var obj = new GameObject("VS_Light");
+            obj.transform.SetParent(transform);
+            obj.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            var light = obj.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 1.2f;
+            light.shadows = LightShadows.None;
         }
 
         void CreatePlayerPool()
@@ -147,8 +159,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 var mat = new Material(_matPlayer) { color = PlayerColors[i] };
                 obj.GetComponent<Renderer>().sharedMaterial = mat;
                 _playerMats[i] = mat;
-                var col = obj.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+                DestroyCollider(obj);
                 obj.SetActive(false);
                 _playerObjs[i] = obj;
             }
@@ -162,9 +173,9 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 obj.name = "VS_Enemy";
                 obj.transform.SetParent(transform);
                 obj.transform.localScale = new Vector3(0.7f, 0.9f, 0.7f);
-                obj.GetComponent<Renderer>().sharedMaterial = _matEnemy;
-                var col = obj.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+                _enemyRenderers[i] = obj.GetComponent<Renderer>();
+                _enemyRenderers[i].sharedMaterial = _matZombie;
+                DestroyCollider(obj);
                 obj.SetActive(false);
                 _enemyPool[i] = obj;
             }
@@ -178,9 +189,9 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 obj.name = "VS_Proj";
                 obj.transform.SetParent(transform);
                 obj.transform.localScale = new Vector3(0.1f, 0.1f, 0.35f);
-                obj.GetComponent<Renderer>().sharedMaterial = _matKnife;
-                var col = obj.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+                _projRenderers[i] = obj.GetComponent<Renderer>();
+                _projRenderers[i].sharedMaterial = _matKnife;
+                DestroyCollider(obj);
                 obj.SetActive(false);
                 _projPool[i] = obj;
             }
@@ -195,29 +206,58 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 obj.transform.SetParent(transform);
                 obj.transform.localScale = new Vector3(0.25f, 0.25f, 0.25f);
                 obj.GetComponent<Renderer>().sharedMaterial = _matGem;
-                var col = obj.GetComponent<Collider>();
-                if (col != null) Destroy(col);
+                DestroyCollider(obj);
                 obj.SetActive(false);
                 _gemPool[i] = obj;
             }
         }
 
-        void CreateLight()
+        void CreateOrbPool()
         {
-            var lightObj = new GameObject("VS_Light");
-            lightObj.transform.SetParent(transform);
-            lightObj.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
-            var light = lightObj.AddComponent<Light>();
-            light.type = LightType.Directional;
-            light.intensity = 1.2f;
-            light.shadows = LightShadows.None;
+            for (int i = 0; i < TotalOrbs; i++)
+            {
+                var obj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                obj.name = "VS_Orb";
+                obj.transform.SetParent(transform);
+                obj.transform.localScale = new Vector3(0.35f, 0.35f, 0.35f);
+                obj.GetComponent<Renderer>().sharedMaterial = _matOrb;
+                DestroyCollider(obj);
+                obj.SetActive(false);
+                _orbPool[i] = obj;
+            }
         }
+
+        void CreateFlashPool()
+        {
+            for (int i = 0; i < GameState.MaxLightningFlashes; i++)
+            {
+                var obj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                obj.name = "VS_Flash";
+                obj.transform.SetParent(transform);
+                obj.transform.localScale = new Vector3(0.6f, 2f, 0.6f);
+                obj.GetComponent<Renderer>().sharedMaterial = _matLightning;
+                DestroyCollider(obj);
+                obj.SetActive(false);
+                _flashPool[i] = obj;
+            }
+        }
+
+        // ==================== SyncVisuals ====================
 
         public void SyncVisuals()
         {
             if (!_initialized || _state == null) return;
 
-            // --- Players ---
+            SyncPlayers();
+            SyncEnemies();
+            SyncProjectiles();
+            SyncGems();
+            SyncOrbs();
+            SyncFlashes();
+        }
+
+        void SyncPlayers()
+        {
             for (int i = 0; i < GameState.MaxPlayers; i++)
             {
                 ref var p = ref _state.Players[i];
@@ -226,32 +266,51 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 if (!show) continue;
 
                 _playerObjs[i].transform.position = new Vector3(p.PosX, 0.5f, p.PosZ);
-
-                // Face movement direction
                 if (p.FacingX != 0f || p.FacingZ != 0f)
                 {
                     float angle = Mathf.Atan2(p.FacingX, p.FacingZ) * Mathf.Rad2Deg;
                     _playerObjs[i].transform.rotation = Quaternion.Euler(0f, angle, 0f);
                 }
 
-                // Flash on invincibility
                 var rend = _playerObjs[i].GetComponent<Renderer>();
                 rend.sharedMaterial = p.InvincibilityFrames > 0 && (_state.FrameNumber % 4 < 2)
-                    ? _matPlayerHit
-                    : _playerMats[i];
+                    ? _matPlayerHit : _playerMats[i];
             }
+        }
 
-            // --- Enemies ---
+        void SyncEnemies()
+        {
             for (int i = 0; i < GameState.MaxEnemies; i++)
             {
                 ref var e = ref _state.Enemies[i];
                 bool show = e.IsAlive;
                 _enemyPool[i].SetActive(show);
-                if (show)
-                    _enemyPool[i].transform.position = new Vector3(e.PosX, 0.45f, e.PosZ);
-            }
+                if (!show) continue;
 
-            // --- Projectiles ---
+                _enemyPool[i].transform.position = new Vector3(e.PosX, 0.45f, e.PosZ);
+
+                // Size and material by type
+                switch (e.Type)
+                {
+                    case EnemyType.Zombie:
+                        _enemyPool[i].transform.localScale = new Vector3(0.7f, 0.9f, 0.7f);
+                        _enemyRenderers[i].sharedMaterial = _matZombie;
+                        break;
+                    case EnemyType.Bat:
+                        _enemyPool[i].transform.localScale = new Vector3(0.5f, 0.4f, 0.5f);
+                        _enemyPool[i].transform.position = new Vector3(e.PosX, 0.8f, e.PosZ); // flies higher
+                        _enemyRenderers[i].sharedMaterial = _matBat;
+                        break;
+                    case EnemyType.SkeletonMage:
+                        _enemyPool[i].transform.localScale = new Vector3(0.6f, 1.1f, 0.6f);
+                        _enemyRenderers[i].sharedMaterial = _matMage;
+                        break;
+                }
+            }
+        }
+
+        void SyncProjectiles()
+        {
             for (int i = 0; i < GameState.MaxProjectiles; i++)
             {
                 ref var p = ref _state.Projectiles[i];
@@ -259,16 +318,43 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 _projPool[i].SetActive(show);
                 if (!show) continue;
 
-                _projPool[i].transform.position = new Vector3(p.PosX, 0.5f, p.PosZ);
-                // Rotate knife to face travel direction
-                if (p.DirX != 0f || p.DirZ != 0f)
+                switch (p.Type)
                 {
-                    float angle = Mathf.Atan2(p.DirX, p.DirZ) * Mathf.Rad2Deg;
-                    _projPool[i].transform.rotation = Quaternion.Euler(0f, angle, 0f);
+                    case ProjectileType.Knife:
+                        _projPool[i].transform.localScale = new Vector3(0.1f, 0.1f, 0.35f);
+                        _projPool[i].transform.position = new Vector3(p.PosX, 0.5f, p.PosZ);
+                        _projRenderers[i].sharedMaterial = _matKnife;
+                        if (p.DirX != 0f || p.DirZ != 0f)
+                        {
+                            float angle = Mathf.Atan2(p.DirX, p.DirZ) * Mathf.Rad2Deg;
+                            _projPool[i].transform.rotation = Quaternion.Euler(0f, angle, 0f);
+                        }
+                        break;
+
+                    case ProjectileType.BoneShard:
+                        _projPool[i].transform.localScale = new Vector3(0.15f, 0.15f, 0.25f);
+                        _projPool[i].transform.position = new Vector3(p.PosX, 0.6f, p.PosZ);
+                        _projRenderers[i].sharedMaterial = _matBoneShard;
+                        if (p.DirX != 0f || p.DirZ != 0f)
+                        {
+                            float angle = Mathf.Atan2(p.DirX, p.DirZ) * Mathf.Rad2Deg;
+                            _projPool[i].transform.rotation = Quaternion.Euler(0f, angle, 0f);
+                        }
+                        break;
+
+                    case ProjectileType.HolyPuddle:
+                        float diameter = p.Radius * 2f;
+                        _projPool[i].transform.localScale = new Vector3(diameter, 0.05f, diameter);
+                        _projPool[i].transform.position = new Vector3(p.PosX, 0.02f, p.PosZ);
+                        _projPool[i].transform.rotation = Quaternion.identity;
+                        _projRenderers[i].sharedMaterial = _matHolyWater;
+                        break;
                 }
             }
+        }
 
-            // --- Gems ---
+        void SyncGems()
+        {
             for (int i = 0; i < GameState.MaxGems; i++)
             {
                 ref var g = ref _state.Gems[i];
@@ -276,47 +362,61 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 _gemPool[i].SetActive(show);
                 if (show)
                 {
-                    // Slight float/bob animation
                     float bob = Mathf.Sin((_state.FrameNumber + i * 7) * 0.15f) * 0.1f;
                     _gemPool[i].transform.position = new Vector3(g.PosX, 0.2f + bob, g.PosZ);
                 }
             }
-
-            // --- Camera follow local player ---
-            UpdateCamera();
         }
 
-        void UpdateCamera()
+        void SyncOrbs()
         {
-            if (_cam == null) return;
-
-            Vector3 target = Vector3.zero;
-            if (_localSlot >= 0 && _localSlot < GameState.MaxPlayers)
+            for (int p = 0; p < GameState.MaxPlayers; p++)
             {
-                ref var p = ref _state.Players[_localSlot];
-                if (p.IsActive)
-                    target = new Vector3(p.PosX, 0f, p.PosZ);
+                ref var player = ref _state.Players[p];
+                for (int o = 0; o < PlayerState.MaxOrbs; o++)
+                {
+                    int poolIdx = p * PlayerState.MaxOrbs + o;
+                    ref var orb = ref player.GetOrb(o);
+
+                    bool show = player.IsActive && player.IsAlive && orb.Active;
+                    _orbPool[poolIdx].SetActive(show);
+                    if (!show) continue;
+
+                    float rad = orb.AngleDeg * 0.01745329f;
+                    float ox = player.PosX + Mathf.Cos(rad) * GameState.OrbOrbitRadius;
+                    float oz = player.PosZ + Mathf.Sin(rad) * GameState.OrbOrbitRadius;
+                    _orbPool[poolIdx].transform.position = new Vector3(ox, 0.5f, oz);
+                }
             }
+        }
 
-            // Position camera behind and above the player
-            float rad = CamAngle * Mathf.Deg2Rad;
-            Vector3 offset = new Vector3(0f, CamHeight * Mathf.Sin(rad), -CamHeight * Mathf.Cos(rad));
-            Vector3 desired = target + offset;
+        void SyncFlashes()
+        {
+            for (int i = 0; i < GameState.MaxLightningFlashes; i++)
+            {
+                ref var f = ref _state.Flashes[i];
+                bool show = f.FramesLeft > 0;
+                _flashPool[i].SetActive(show);
+                if (show)
+                    _flashPool[i].transform.position = new Vector3(f.PosX, 1f, f.PosZ);
+            }
+        }
 
-            // Smooth follow
-            _cam.transform.position = Vector3.Lerp(_cam.transform.position, desired, 0.1f);
-            _cam.transform.LookAt(target + Vector3.up * 0.5f);
+        // ==================== Cleanup ====================
+
+        static void DestroyCollider(GameObject obj)
+        {
+            var col = obj.GetComponent<Collider>();
+            if (col != null) Destroy(col);
         }
 
         void OnDestroy()
         {
-            // Cleanup materials
-            if (_matPlayer != null) Destroy(_matPlayer);
-            if (_matEnemy != null) Destroy(_matEnemy);
-            if (_matKnife != null) Destroy(_matKnife);
-            if (_matGem != null) Destroy(_matGem);
-            if (_matGround != null) Destroy(_matGround);
-            if (_matPlayerHit != null) Destroy(_matPlayerHit);
+            Destroy(_matPlayer); Destroy(_matPlayerHit);
+            Destroy(_matZombie); Destroy(_matBat); Destroy(_matMage);
+            Destroy(_matKnife); Destroy(_matBoneShard);
+            Destroy(_matGem); Destroy(_matGround);
+            Destroy(_matOrb); Destroy(_matLightning); Destroy(_matHolyWater);
             for (int i = 0; i < _playerMats.Length; i++)
                 if (_playerMats[i] != null) Destroy(_playerMats[i]);
         }

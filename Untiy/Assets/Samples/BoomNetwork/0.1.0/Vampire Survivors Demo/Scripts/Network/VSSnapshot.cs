@@ -1,7 +1,7 @@
-// BoomNetwork VampireSurvivors Demo — Snapshot Serialization
+// BoomNetwork VampireSurvivors Demo — Snapshot Serialization (Phase 2)
 //
-// Serializes/deserializes the complete GameState for reconnect recovery.
-// Only writes alive entities to minimize payload (~30KB max).
+// Serializes/deserializes complete GameState including weapon slots,
+// orb state, enemy types, projectile types, and lightning flashes.
 
 using System;
 using System.IO;
@@ -10,11 +10,11 @@ namespace BoomNetwork.Samples.VampireSurvivors
 {
     public static class VSSnapshot
     {
-        static readonly byte[] Magic = { (byte)'V', (byte)'S', (byte)'0', (byte)'1' };
+        static readonly byte[] Magic = { (byte)'V', (byte)'S', (byte)'0', (byte)'2' };
 
         public static byte[] Serialize(GameState state)
         {
-            using var ms = new MemoryStream(4096);
+            using var ms = new MemoryStream(8192);
             using var w = new BinaryWriter(ms);
 
             // Header
@@ -25,7 +25,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             w.Write(state.WaveSpawnTimer);
             w.Write(state.WaveSpawnRemaining);
 
-            // Players (always write all 4 slots)
+            // Players
             for (int i = 0; i < GameState.MaxPlayers; i++)
             {
                 ref var p = ref state.Players[i];
@@ -36,12 +36,30 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 w.Write(p.Hp); w.Write(p.MaxHp);
                 w.Write(p.Xp); w.Write(p.Level);
                 w.Write(p.XpToNextLevel);
-                w.Write(p.KnifeCooldown);
                 w.Write(p.InvincibilityFrames);
                 w.Write(p.KillCount);
+                w.Write(p.PendingLevelUp);
+                w.Write(p.UpgradeChoice);
+
+                // Weapon slots
+                for (int ws = 0; ws < PlayerState.MaxWeaponSlots; ws++)
+                {
+                    ref var wslot = ref p.GetWeapon(ws);
+                    w.Write((byte)wslot.Type);
+                    w.Write(wslot.Level);
+                    w.Write(wslot.Cooldown);
+                }
+
+                // Orbs
+                for (int o = 0; o < PlayerState.MaxOrbs; o++)
+                {
+                    ref var orb = ref p.GetOrb(o);
+                    w.Write(orb.Active);
+                    w.Write(orb.AngleDeg);
+                }
             }
 
-            // Enemies (count-prefixed, alive only)
+            // Enemies (alive only)
             ushort enemyCount = 0;
             for (int i = 0; i < GameState.MaxEnemies; i++)
                 if (state.Enemies[i].IsAlive) enemyCount++;
@@ -50,12 +68,15 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var e = ref state.Enemies[i];
                 if (!e.IsAlive) continue;
+                w.Write((byte)e.Type);
                 w.Write(e.PosX); w.Write(e.PosZ);
+                w.Write(e.DirX); w.Write(e.DirZ);
                 w.Write(e.Hp);
                 w.Write(e.TargetPlayerId);
+                w.Write(e.BehaviorTimer);
             }
 
-            // Projectiles
+            // Projectiles (alive only)
             ushort projCount = 0;
             for (int i = 0; i < GameState.MaxProjectiles; i++)
                 if (state.Projectiles[i].IsAlive) projCount++;
@@ -64,13 +85,16 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var p = ref state.Projectiles[i];
                 if (!p.IsAlive) continue;
+                w.Write((byte)p.Type);
                 w.Write(p.PosX); w.Write(p.PosZ);
                 w.Write(p.DirX); w.Write(p.DirZ);
+                w.Write(p.Radius);
                 w.Write(p.LifetimeFrames);
                 w.Write(p.OwnerPlayerId);
+                w.Write(p.DamageTick);
             }
 
-            // Gems
+            // Gems (alive only)
             ushort gemCount = 0;
             for (int i = 0; i < GameState.MaxGems; i++)
                 if (state.Gems[i].IsAlive) gemCount++;
@@ -83,6 +107,15 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 w.Write(g.Value);
             }
 
+            // Lightning flashes
+            w.Write((byte)GameState.MaxLightningFlashes);
+            for (int i = 0; i < GameState.MaxLightningFlashes; i++)
+            {
+                ref var f = ref state.Flashes[i];
+                w.Write(f.PosX); w.Write(f.PosZ);
+                w.Write(f.FramesLeft);
+            }
+
             return ms.ToArray();
         }
 
@@ -91,8 +124,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             using var ms = new MemoryStream(data);
             using var r = new BinaryReader(ms);
 
-            // Header
-            byte[] magic = r.ReadBytes(4);
+            r.ReadBytes(4); // magic
             state.FrameNumber = r.ReadUInt32();
             state.RngState = r.ReadUInt32();
             state.WaveNumber = r.ReadInt32();
@@ -110,15 +142,32 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 p.Hp = r.ReadInt32(); p.MaxHp = r.ReadInt32();
                 p.Xp = r.ReadInt32(); p.Level = r.ReadInt32();
                 p.XpToNextLevel = r.ReadInt32();
-                p.KnifeCooldown = r.ReadUInt32();
                 p.InvincibilityFrames = r.ReadUInt32();
                 p.KillCount = r.ReadInt32();
+                p.PendingLevelUp = r.ReadBoolean();
+                p.UpgradeChoice = r.ReadByte();
+
+                for (int ws = 0; ws < PlayerState.MaxWeaponSlots; ws++)
+                {
+                    ref var wslot = ref p.GetWeapon(ws);
+                    wslot.Type = (WeaponType)r.ReadByte();
+                    wslot.Level = r.ReadInt32();
+                    wslot.Cooldown = r.ReadUInt32();
+                }
+
+                for (int o = 0; o < PlayerState.MaxOrbs; o++)
+                {
+                    ref var orb = ref p.GetOrb(o);
+                    orb.Active = r.ReadBoolean();
+                    orb.AngleDeg = r.ReadSingle();
+                }
             }
 
-            // Clear all entity arrays
+            // Clear arrays
             Array.Clear(state.Enemies, 0, GameState.MaxEnemies);
             Array.Clear(state.Projectiles, 0, GameState.MaxProjectiles);
             Array.Clear(state.Gems, 0, GameState.MaxGems);
+            Array.Clear(state.Flashes, 0, GameState.MaxLightningFlashes);
 
             // Enemies
             ushort enemyCount = r.ReadUInt16();
@@ -126,9 +175,12 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var e = ref state.Enemies[i];
                 e.IsAlive = true;
+                e.Type = (EnemyType)r.ReadByte();
                 e.PosX = r.ReadSingle(); e.PosZ = r.ReadSingle();
+                e.DirX = r.ReadSingle(); e.DirZ = r.ReadSingle();
                 e.Hp = r.ReadInt32();
                 e.TargetPlayerId = r.ReadInt32();
+                e.BehaviorTimer = r.ReadUInt32();
             }
 
             // Projectiles
@@ -137,10 +189,13 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var p = ref state.Projectiles[i];
                 p.IsAlive = true;
+                p.Type = (ProjectileType)r.ReadByte();
                 p.PosX = r.ReadSingle(); p.PosZ = r.ReadSingle();
                 p.DirX = r.ReadSingle(); p.DirZ = r.ReadSingle();
+                p.Radius = r.ReadSingle();
                 p.LifetimeFrames = r.ReadUInt32();
                 p.OwnerPlayerId = r.ReadInt32();
+                p.DamageTick = r.ReadUInt32();
             }
 
             // Gems
@@ -151,6 +206,15 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 g.IsAlive = true;
                 g.PosX = r.ReadSingle(); g.PosZ = r.ReadSingle();
                 g.Value = r.ReadInt32();
+            }
+
+            // Lightning flashes
+            byte flashCount = r.ReadByte();
+            for (int i = 0; i < flashCount; i++)
+            {
+                ref var f = ref state.Flashes[i];
+                f.PosX = r.ReadSingle(); f.PosZ = r.ReadSingle();
+                f.FramesLeft = r.ReadUInt32();
             }
         }
     }

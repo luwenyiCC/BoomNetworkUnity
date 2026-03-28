@@ -16,7 +16,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
         static readonly int[] _posXRaw = new int[GameState.MaxEnemies];
         static readonly int[] _posZRaw = new int[GameState.MaxEnemies];
 
-        static readonly FInt _approxEnemyR = FInt.FromFloat(0.4f);
+        static readonly FInt _approxEnemyR = new FInt(409);  // 0.4 * 1024 = 409
 
         static int CellIndex(int rawX, int rawZ)
         {

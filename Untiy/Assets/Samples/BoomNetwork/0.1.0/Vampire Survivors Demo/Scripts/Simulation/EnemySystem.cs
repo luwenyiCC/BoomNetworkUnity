@@ -5,9 +5,9 @@ namespace BoomNetwork.Samples.VampireSurvivors
     public static class EnemySystem
     {
         const uint RetargetInterval = 20;
-        static readonly FInt _pointZeroOne = FInt.FromFloat(0.01f);
-        static readonly FInt _06 = FInt.FromFloat(0.6f);
-        static readonly FInt _04 = FInt.FromFloat(0.4f);
+        static readonly FInt _pointZeroOne = new FInt(10);  // 0.01 * 1024 = 10
+        static readonly FInt _06 = new FInt(614);           // 0.6  * 1024 = 614
+        static readonly FInt _04 = new FInt(409);           // 0.4  * 1024 = 409
 
         public static void Tick(GameState state)
         {

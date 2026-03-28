@@ -125,30 +125,30 @@ namespace BoomNetwork.Samples.VampireSurvivors
         public static readonly FInt ArenaHalfSize = FInt.FromInt(20);
 
         // --- Player ---
-        public static readonly FInt PlayerSpeed = FInt.FromFloat(7f);
-        public static readonly FInt PlayerRadius = FInt.FromFloat(0.4f);
+        public static readonly FInt PlayerSpeed = new FInt(7168);    // 7.0
+        public static readonly FInt PlayerRadius = new FInt(409);    // 0.4
         public const int PlayerMaxHp = 200;
         public const int PlayerBaseXpToLevel = 8;
         public const uint InvincibilityDuration = 30;
 
         // --- Zombie ---
-        public static readonly FInt ZombieSpeed = FInt.FromFloat(2.2f);
-        public static readonly FInt ZombieRadius = FInt.FromFloat(0.4f);
+        public static readonly FInt ZombieSpeed = new FInt(2252);    // 2.2 (2252/1024=2.19922)
+        public static readonly FInt ZombieRadius = new FInt(409);    // 0.4
         public const int ZombieHp = 1;
         public const int ZombieDamage = 5;
         public const int ZombieXpValue = 1;
 
         // --- Bat ---
-        public static readonly FInt BatSpeed = FInt.FromFloat(4f);
-        public static readonly FInt BatRadius = FInt.FromFloat(0.3f);
+        public static readonly FInt BatSpeed = new FInt(4096);       // 4.0
+        public static readonly FInt BatRadius = new FInt(307);       // 0.3
         public const int BatHp = 1;
         public const int BatDamage = 3;
         public const int BatXpValue = 2;
         public const uint BatDirChangeInterval = 8;
 
         // --- Skeleton Mage ---
-        public static readonly FInt MageSpeed = FInt.FromFloat(1.5f);
-        public static readonly FInt MageRadius = FInt.FromFloat(0.4f);
+        public static readonly FInt MageSpeed = new FInt(1536);      // 1.5
+        public static readonly FInt MageRadius = new FInt(409);      // 0.4
         public const int MageHp = 3;
         public const int MageDamage = 5;
         public const int MageXpValue = 5;
@@ -156,20 +156,20 @@ namespace BoomNetwork.Samples.VampireSurvivors
         public const uint MageFireCooldown = 60;
         public static readonly FInt BoneShardSpeed = FInt.FromInt(5);
         public const uint BoneShardLifetime = 25;
-        public static readonly FInt BoneShardRadius = FInt.FromFloat(0.2f);
+        public static readonly FInt BoneShardRadius = new FInt(204); // 0.2
         public const int BoneShardDamage = 8;
 
         // --- Knife ---
         public static readonly FInt KnifeSpeed = FInt.FromInt(14);
-        public static readonly FInt KnifeRadius = FInt.FromFloat(0.2f);
+        public static readonly FInt KnifeRadius = new FInt(204);     // 0.2
         public const int KnifeDamage = 2;
         public const uint KnifeBaseCooldown = 6;
         public const uint KnifeLifetimeFrames = 40;
 
         // --- Orb ---
-        public static readonly FInt OrbOrbitRadius = FInt.FromFloat(1.8f);
+        public static readonly FInt OrbOrbitRadius = new FInt(1843); // 1.8 (1843/1024=1.79980)
         public static readonly FInt OrbAngularSpeed = FInt.FromInt(220); // deg/s
-        public static readonly FInt OrbHitRadius = FInt.FromFloat(0.5f);
+        public static readonly FInt OrbHitRadius = new FInt(512);    // 0.5
         public const int OrbDamage = 3;
 
         // --- Lightning ---
@@ -186,10 +186,10 @@ namespace BoomNetwork.Samples.VampireSurvivors
         public const uint HolyWaterDamageTick = 6;
 
         // --- XP ---
-        public static readonly FInt XpPickupRadius = FInt.FromFloat(1.5f);
+        public static readonly FInt XpPickupRadius = new FInt(1536); // 1.5
 
         // --- Shared ---
-        static readonly FInt _enemyApproxRadius = FInt.FromFloat(0.4f);
+        static readonly FInt _enemyApproxRadius = new FInt(409);     // 0.4
 
         // --- State ---
         public uint FrameNumber;
@@ -211,7 +211,8 @@ namespace BoomNetwork.Samples.VampireSurvivors
             ref var p = ref Players[slot];
             p.IsActive = true;
             p.IsAlive = true;
-            FInt angle = FInt.FromFloat(slot * 1.5708f);
+            // π/2 * 1024 = 1608. Hardcoded to avoid runtime float arithmetic.
+            FInt angle = new FInt(slot * 1608);
             p.PosX = FInt.Cos(angle) * 2;
             p.PosZ = FInt.Sin(angle) * 2;
             p.FacingX = FInt.Zero;

@@ -8,8 +8,8 @@ namespace BoomNetwork.Samples.VampireSurvivors
     {
         static readonly FInt _autoAimRange = FInt.FromInt(15);
         static readonly FInt _arenaKillLimit = GameState.ArenaHalfSize + FInt.FromInt(5);
-        static readonly FInt _03 = FInt.FromFloat(0.3f);
-        static readonly FInt _05 = FInt.FromFloat(0.5f);
+        static readonly FInt _03 = new FInt(307);  // 0.3 * 1024 = 307
+        static readonly FInt _05 = new FInt(512);  // 0.5 * 1024 = 512
         static readonly FInt _360 = FInt.FromInt(360);
         static readonly FInt _30 = FInt.FromInt(30);
 

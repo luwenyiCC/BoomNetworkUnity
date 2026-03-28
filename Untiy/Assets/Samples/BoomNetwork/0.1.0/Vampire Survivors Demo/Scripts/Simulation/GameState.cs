@@ -314,6 +314,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
             h = Fnv(h, FrameNumber);
             h = Fnv(h, RngState);
+            h = Fnv(h, (uint)Dt.Raw);
             h = Fnv(h, (uint)WaveNumber);
             h = Fnv(h, WaveSpawnTimer);
             h = Fnv(h, WaveSpawnRemaining);
@@ -325,12 +326,30 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 h = Fnv(h, p.IsAlive ? 1u : 0u);
                 h = Fnv(h, (uint)p.PosX.Raw);
                 h = Fnv(h, (uint)p.PosZ.Raw);
+                h = Fnv(h, (uint)p.FacingX.Raw);
+                h = Fnv(h, (uint)p.FacingZ.Raw);
                 h = Fnv(h, (uint)p.Hp);
+                h = Fnv(h, (uint)p.MaxHp);
                 h = Fnv(h, (uint)p.Xp);
                 h = Fnv(h, (uint)p.Level);
+                h = Fnv(h, (uint)p.XpToNextLevel);
                 h = Fnv(h, p.InvincibilityFrames);
                 h = Fnv(h, (uint)p.KillCount);
                 h = Fnv(h, p.PendingLevelUp ? 1u : 0u);
+                h = Fnv(h, (uint)p.UpgradeChoice);
+                for (int ws = 0; ws < PlayerState.MaxWeaponSlots; ws++)
+                {
+                    var w = p.GetWeapon(ws);
+                    h = Fnv(h, (uint)w.Type);
+                    h = Fnv(h, (uint)w.Level);
+                    h = Fnv(h, w.Cooldown);
+                }
+                for (int o = 0; o < PlayerState.MaxOrbs; o++)
+                {
+                    var orb = p.GetOrb(o);
+                    h = Fnv(h, orb.Active ? 1u : 0u);
+                    h = Fnv(h, (uint)orb.AngleDeg.Raw);
+                }
             }
 
             for (int i = 0; i < MaxEnemies; i++)
@@ -338,9 +357,14 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 ref var e = ref Enemies[i];
                 if (!e.IsAlive) continue;
                 h = Fnv(h, (uint)i);
+                h = Fnv(h, (uint)e.Type);
                 h = Fnv(h, (uint)e.PosX.Raw);
                 h = Fnv(h, (uint)e.PosZ.Raw);
+                h = Fnv(h, (uint)e.DirX.Raw);
+                h = Fnv(h, (uint)e.DirZ.Raw);
                 h = Fnv(h, (uint)e.Hp);
+                h = Fnv(h, (uint)e.TargetPlayerId);
+                h = Fnv(h, e.BehaviorTimer);
             }
 
             for (int i = 0; i < MaxProjectiles; i++)
@@ -348,8 +372,25 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 ref var p = ref Projectiles[i];
                 if (!p.IsAlive) continue;
                 h = Fnv(h, (uint)i);
+                h = Fnv(h, (uint)p.Type);
                 h = Fnv(h, (uint)p.PosX.Raw);
                 h = Fnv(h, (uint)p.PosZ.Raw);
+                h = Fnv(h, (uint)p.DirX.Raw);
+                h = Fnv(h, (uint)p.DirZ.Raw);
+                h = Fnv(h, (uint)p.Radius.Raw);
+                h = Fnv(h, p.LifetimeFrames);
+                h = Fnv(h, (uint)p.OwnerPlayerId);
+                h = Fnv(h, p.DamageTick);
+            }
+
+            for (int i = 0; i < MaxGems; i++)
+            {
+                ref var g = ref Gems[i];
+                if (!g.IsAlive) continue;
+                h = Fnv(h, (uint)i);
+                h = Fnv(h, (uint)g.PosX.Raw);
+                h = Fnv(h, (uint)g.PosZ.Raw);
+                h = Fnv(h, (uint)g.Value);
             }
 
             return h;

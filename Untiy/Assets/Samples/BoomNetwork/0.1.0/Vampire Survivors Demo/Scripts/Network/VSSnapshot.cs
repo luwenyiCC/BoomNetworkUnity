@@ -19,6 +19,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             w.Write(Magic);
             w.Write(state.FrameNumber);
             w.Write(state.RngState);
+            w.Write(state.Dt.Raw);
             w.Write(state.WaveNumber);
             w.Write(state.WaveSpawnTimer);
             w.Write(state.WaveSpawnRemaining);
@@ -47,6 +48,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 }
             }
 
+            // Enemies: write slot index to preserve layout across serialize/deserialize
             ushort enemyCount = 0;
             for (int i = 0; i < GameState.MaxEnemies; i++) if (state.Enemies[i].IsAlive) enemyCount++;
             w.Write(enemyCount);
@@ -54,12 +56,14 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var e = ref state.Enemies[i];
                 if (!e.IsAlive) continue;
+                w.Write((ushort)i); // slot index — critical for AllocEnemy determinism
                 w.Write((byte)e.Type);
                 w.Write(e.PosX.Raw); w.Write(e.PosZ.Raw);
                 w.Write(e.DirX.Raw); w.Write(e.DirZ.Raw);
                 w.Write(e.Hp); w.Write(e.TargetPlayerId); w.Write(e.BehaviorTimer);
             }
 
+            // Projectiles: write slot index
             ushort projCount = 0;
             for (int i = 0; i < GameState.MaxProjectiles; i++) if (state.Projectiles[i].IsAlive) projCount++;
             w.Write(projCount);
@@ -67,6 +71,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var p = ref state.Projectiles[i];
                 if (!p.IsAlive) continue;
+                w.Write((ushort)i); // slot index
                 w.Write((byte)p.Type);
                 w.Write(p.PosX.Raw); w.Write(p.PosZ.Raw);
                 w.Write(p.DirX.Raw); w.Write(p.DirZ.Raw);
@@ -74,6 +79,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 w.Write(p.LifetimeFrames); w.Write(p.OwnerPlayerId); w.Write(p.DamageTick);
             }
 
+            // Gems: write slot index
             ushort gemCount = 0;
             for (int i = 0; i < GameState.MaxGems; i++) if (state.Gems[i].IsAlive) gemCount++;
             w.Write(gemCount);
@@ -81,6 +87,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var g = ref state.Gems[i];
                 if (!g.IsAlive) continue;
+                w.Write((ushort)i); // slot index
                 w.Write(g.PosX.Raw); w.Write(g.PosZ.Raw); w.Write(g.Value);
             }
 
@@ -102,6 +109,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             r.ReadBytes(4);
             state.FrameNumber = r.ReadUInt32();
             state.RngState = r.ReadUInt32();
+            state.Dt = new FInt(r.ReadInt32());
             state.WaveNumber = r.ReadInt32();
             state.WaveSpawnTimer = r.ReadUInt32();
             state.WaveSpawnRemaining = r.ReadUInt32();
@@ -138,10 +146,12 @@ namespace BoomNetwork.Samples.VampireSurvivors
             Array.Clear(state.Gems, 0, GameState.MaxGems);
             Array.Clear(state.Flashes, 0, GameState.MaxLightningFlashes);
 
+            // Enemies: restore to original slot index
             ushort enemyCount = r.ReadUInt16();
             for (int i = 0; i < enemyCount; i++)
             {
-                ref var e = ref state.Enemies[i];
+                int slot = r.ReadUInt16();
+                ref var e = ref state.Enemies[slot];
                 e.IsAlive = true;
                 e.Type = (EnemyType)r.ReadByte();
                 e.PosX = new FInt(r.ReadInt32()); e.PosZ = new FInt(r.ReadInt32());
@@ -149,10 +159,12 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 e.Hp = r.ReadInt32(); e.TargetPlayerId = r.ReadInt32(); e.BehaviorTimer = r.ReadUInt32();
             }
 
+            // Projectiles: restore to original slot index
             ushort projCount = r.ReadUInt16();
             for (int i = 0; i < projCount; i++)
             {
-                ref var p = ref state.Projectiles[i];
+                int slot = r.ReadUInt16();
+                ref var p = ref state.Projectiles[slot];
                 p.IsAlive = true;
                 p.Type = (ProjectileType)r.ReadByte();
                 p.PosX = new FInt(r.ReadInt32()); p.PosZ = new FInt(r.ReadInt32());
@@ -161,10 +173,12 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 p.LifetimeFrames = r.ReadUInt32(); p.OwnerPlayerId = r.ReadInt32(); p.DamageTick = r.ReadUInt32();
             }
 
+            // Gems: restore to original slot index
             ushort gemCount = r.ReadUInt16();
             for (int i = 0; i < gemCount; i++)
             {
-                ref var g = ref state.Gems[i];
+                int slot = r.ReadUInt16();
+                ref var g = ref state.Gems[slot];
                 g.IsAlive = true;
                 g.PosX = new FInt(r.ReadInt32()); g.PosZ = new FInt(r.ReadInt32()); g.Value = r.ReadInt32();
             }

@@ -104,6 +104,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 if (hit < 0) continue;
 
                 ref var enemy = ref state.Enemies[hit];
+                if (!enemy.IsAlive) continue; // may have been killed by Lightning this frame
                 FInt actualR = GameState.KnifeRadius + GameState.GetEnemyRadius(enemy.Type);
                 long arSq = (long)actualR.Raw * actualR.Raw;
                 long dx = proj.PosX.Raw - _posXRaw[hit];
@@ -134,6 +135,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                     if (hit < 0) continue;
 
                     ref var enemy = ref state.Enemies[hit];
+                    if (!enemy.IsAlive) continue; // may have been killed earlier this frame
                     FInt actualR = GameState.OrbHitRadius + GameState.GetEnemyRadius(enemy.Type);
                     long arSq = (long)actualR.Raw * actualR.Raw;
                     long dx = orbX.Raw - _posXRaw[hit];
@@ -180,6 +182,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                             if (dx * dx + dz * dz < searchRSq)
                             {
                                 ref var enemy = ref state.Enemies[idx];
+                                if (!enemy.IsAlive) { idx = NextInBucket[idx]; continue; }
                                 FInt actualR = projRadius + GameState.GetEnemyRadius(enemy.Type);
                                 long arSq = (long)actualR.Raw * actualR.Raw;
                                 if (dx * dx + dz * dz <= arSq)

@@ -53,8 +53,8 @@ namespace BoomNetwork.Samples.VampireSurvivors
             {
                 ref var tgt = ref state.Enemies[nearest];
                 FInt dx = tgt.PosX - player.PosX, dz = tgt.PosZ - player.PosZ;
-                FInt len = FInt.Sqrt(dx * dx + dz * dz);
-                if (len > FInt.Epsilon) { aimX = dx / len; aimZ = dz / len; }
+                FInt lenSq = FInt.LengthSqr(dx, dz);
+                if (lenSq > FInt.Epsilon) { FInt inv = FInt.InvSqrt(lenSq); aimX = dx * inv; aimZ = dz * inv; }
             }
 
             int count = 1 + (weapon.Level - 1) / 2;

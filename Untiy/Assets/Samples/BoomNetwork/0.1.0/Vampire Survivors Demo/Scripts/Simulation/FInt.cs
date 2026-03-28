@@ -7,6 +7,7 @@
 // Range: ±2,097,151.999  Precision: ~0.001 (1/1024)
 
 using System;
+using System.Runtime.CompilerServices;
 
 namespace BoomNetwork.Samples.VampireSurvivors
 {
@@ -19,14 +20,21 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
         // ==================== Construction ====================
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FInt(int raw) { Raw = raw; }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt FromInt(int v) => new FInt(v << SHIFT);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt FromFloat(float v) => new FInt((int)(v * SCALE));
 
         // ==================== Conversion (Rendering only!) ====================
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float ToFloat() => Raw * (1f / SCALE);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int ToInt() => Raw >> SHIFT;
 
         // ==================== Constants ====================
@@ -43,36 +51,73 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
         // ==================== Operators ====================
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator +(FInt a, FInt b) => new FInt(a.Raw + b.Raw);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator -(FInt a, FInt b) => new FInt(a.Raw - b.Raw);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator -(FInt a) => new FInt(-a.Raw);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator *(FInt a, FInt b) => new FInt((int)((long)a.Raw * b.Raw >> SHIFT));
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator /(FInt a, FInt b) => new FInt((int)(((long)a.Raw << SHIFT) / b.Raw));
 
         // FInt × int (no shift needed for the int side)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator *(FInt a, int b) => new FInt(a.Raw * b);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator *(int a, FInt b) => new FInt(a * b.Raw);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt operator /(FInt a, int b) => new FInt(a.Raw / b);
 
         // ==================== Comparison ====================
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator >(FInt a, FInt b) => a.Raw > b.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator <(FInt a, FInt b) => a.Raw < b.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator >=(FInt a, FInt b) => a.Raw >= b.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator <=(FInt a, FInt b) => a.Raw <= b.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(FInt a, FInt b) => a.Raw == b.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(FInt a, FInt b) => a.Raw != b.Raw;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(FInt other) => Raw == other.Raw;
         public override bool Equals(object obj) => obj is FInt f && Raw == f.Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override int GetHashCode() => Raw;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int CompareTo(FInt other) => Raw.CompareTo(other.Raw);
 
         // ==================== Math ====================
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Abs(FInt v) => new FInt(v.Raw < 0 ? -v.Raw : v.Raw);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Min(FInt a, FInt b) => a.Raw < b.Raw ? a : b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Max(FInt a, FInt b) => a.Raw > b.Raw ? a : b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Clamp(FInt v, FInt min, FInt max)
         {
             if (v.Raw < min.Raw) return min;
@@ -80,25 +125,88 @@ namespace BoomNetwork.Samples.VampireSurvivors
             return v;
         }
 
-        /// <summary>Integer square root in fixed-point. Fully deterministic.</summary>
+        /// <summary>Linear interpolation. t is in [0,1] fixed-point.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static FInt Lerp(FInt a, FInt b, FInt t)
+        {
+            return new FInt(a.Raw + (int)(((long)(b.Raw - a.Raw) * t.Raw) >> SHIFT));
+        }
+
+        /// <summary>Move value towards target by at most maxDelta per call.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static FInt MoveTowards(FInt current, FInt target, FInt maxDelta)
+        {
+            int diff = target.Raw - current.Raw;
+            if (diff > maxDelta.Raw) return new FInt(current.Raw + maxDelta.Raw);
+            if (diff < -maxDelta.Raw) return new FInt(current.Raw - maxDelta.Raw);
+            return target;
+        }
+
+        /// <summary>Integer square root in fixed-point. Binary algorithm — pure bitwise, no division.</summary>
         public static FInt Sqrt(FInt v)
         {
             if (v.Raw <= 0) return Zero;
 
-            // We need: result = sqrt(v) in fixed-point
-            // result.Raw = sqrt(v.Raw * SCALE)
-            long val = (long)v.Raw << SHIFT;
-            long x = v.Raw;
-            if (x <= 0) x = 1;
+            // Binary square root: result.Raw = isqrt(v.Raw << SHIFT)
+            ulong val = (ulong)v.Raw << SHIFT;
+            ulong result = 0;
+            ulong bit = 1UL << 30; // start from highest even bit
 
-            // Newton-Raphson (converges in ~15 iterations for 32-bit)
-            for (int i = 0; i < 16; i++)
+            while (bit > val) bit >>= 2;
+            while (bit != 0)
             {
-                long nx = (x + val / x) >> 1;
-                if (nx >= x) break;
-                x = nx;
+                ulong t = result + bit;
+                result >>= 1;
+                if (val >= t)
+                {
+                    val -= t;
+                    result += bit;
+                }
+                bit >>= 2;
             }
-            return new FInt((int)x);
+            return new FInt((int)result);
+        }
+
+        /// <summary>1 / sqrt(v). Avoids separate Sqrt + division. Deterministic.</summary>
+        public static FInt InvSqrt(FInt v)
+        {
+            if (v.Raw <= 0) return Zero;
+
+            // Binary square root then invert
+            ulong val = (ulong)v.Raw << SHIFT;
+            ulong result = 0;
+            ulong bit = 1UL << 30;
+
+            while (bit > val) bit >>= 2;
+            while (bit != 0)
+            {
+                ulong t = result + bit;
+                result >>= 1;
+                if (val >= t)
+                {
+                    val -= t;
+                    result += bit;
+                }
+                bit >>= 2;
+            }
+            if (result == 0) return MaxValue;
+            return new FInt((int)(((long)SCALE * SCALE) / (long)result));
+        }
+
+        /// <summary>Distance squared between two 2D points. Use for comparison to avoid Sqrt.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static FInt DistanceSqr(FInt ax, FInt az, FInt bx, FInt bz)
+        {
+            long dx = ax.Raw - bx.Raw;
+            long dz = az.Raw - bz.Raw;
+            return new FInt((int)((dx * dx + dz * dz) >> SHIFT));
+        }
+
+        /// <summary>Magnitude squared of a 2D vector. Use for comparison to avoid Sqrt.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static FInt LengthSqr(FInt x, FInt z)
+        {
+            return new FInt((int)(((long)x.Raw * x.Raw + (long)z.Raw * z.Raw) >> SHIFT));
         }
 
         // ==================== Trigonometry (Lookup Table) ====================
@@ -122,48 +230,38 @@ namespace BoomNetwork.Samples.VampireSurvivors
         }
 
         /// <summary>Sin of angle in degrees. Deterministic lookup.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt SinDeg(FInt degrees)
         {
-            // Normalize to [0, 360) then map to table index
-            int deg = degrees.Raw; // fixed-point degrees
-            // Convert to table index: idx = deg * TABLE_SIZE / (360 * SCALE)
-            // = deg * TABLE_SIZE / 368640
-            // Simplify: deg * 1024 / 368640 = deg / 360
-            long idx = ((long)deg * TABLE_SIZE) / (360 * SCALE);
-            int i = (int)(idx % TABLE_SIZE);
-            if (i < 0) i += TABLE_SIZE;
-            return new FInt(SinTable[i]);
+            // idx = deg * TABLE_SIZE / (360 * SCALE)
+            long idx = ((long)degrees.Raw * TABLE_SIZE) / (360 * SCALE);
+            return new FInt(SinTable[(int)(idx & TABLE_MASK)]);
         }
 
         /// <summary>Cos of angle in degrees. Deterministic lookup.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt CosDeg(FInt degrees)
         {
             // cos(x) = sin(x + 90)
-            int deg = degrees.Raw + 90 * SCALE; // add 90 degrees
-            long idx = ((long)deg * TABLE_SIZE) / (360 * SCALE);
-            int i = (int)(idx % TABLE_SIZE);
-            if (i < 0) i += TABLE_SIZE;
-            return new FInt(SinTable[i]);
+            long idx = ((long)(degrees.Raw + 90 * SCALE) * TABLE_SIZE) / (360 * SCALE);
+            return new FInt(SinTable[(int)(idx & TABLE_MASK)]);
         }
 
         /// <summary>Sin of angle in radians (FInt). Deterministic lookup.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Sin(FInt radians)
         {
-            // Convert radians to table index: idx = rad * TABLE_SIZE / (2π)
-            // 2π in fixed-point = 6434
+            // idx = rad * TABLE_SIZE / (2π), 2π in fixed-point = 6434
             long idx = ((long)radians.Raw * TABLE_SIZE) / 6434;
-            int i = (int)(idx % TABLE_SIZE);
-            if (i < 0) i += TABLE_SIZE;
-            return new FInt(SinTable[i]);
+            return new FInt(SinTable[(int)(idx & TABLE_MASK)]);
         }
 
         /// <summary>Cos of angle in radians (FInt). Deterministic lookup.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FInt Cos(FInt radians)
         {
             long idx = ((long)radians.Raw * TABLE_SIZE) / 6434 + TABLE_SIZE / 4; // +90°
-            int i = (int)(idx % TABLE_SIZE);
-            if (i < 0) i += TABLE_SIZE;
-            return new FInt(SinTable[i]);
+            return new FInt(SinTable[(int)(idx & TABLE_MASK)]);
         }
 
         // ==================== Debug ====================

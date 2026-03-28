@@ -89,11 +89,12 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 // Movement only when NOT paused
                 if (!paused && (dirX != FInt.Zero || dirZ != FInt.Zero))
                 {
-                    FInt len = FInt.Sqrt(dirX * dirX + dirZ * dirZ);
-                    if (len > FInt.Epsilon)
+                    FInt lenSq = FInt.LengthSqr(dirX, dirZ);
+                    if (lenSq > FInt.Epsilon)
                     {
-                        player.FacingX = dirX / len;
-                        player.FacingZ = dirZ / len;
+                        FInt invLen = FInt.InvSqrt(lenSq);
+                        player.FacingX = dirX * invLen;
+                        player.FacingZ = dirZ * invLen;
                     }
                     player.PosX = player.PosX + player.FacingX * GameState.PlayerSpeed * State.Dt;
                     player.PosZ = player.PosZ + player.FacingZ * GameState.PlayerSpeed * State.Dt;

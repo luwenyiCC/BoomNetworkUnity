@@ -45,7 +45,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
             FInt dx = target.PosX - e.PosX, dz = target.PosZ - e.PosZ;
             FInt distSq = dx * dx + dz * dz;
             if (distSq < _pointZeroOne) return;
-            FInt invDist = FInt.One / FInt.Sqrt(distSq);
+            FInt invDist = FInt.InvSqrt(distSq);
             FInt step = GameState.ZombieSpeed * dt;
             e.PosX = e.PosX + dx * invDist * step;
             e.PosZ = e.PosZ + dz * invDist * step;
@@ -60,17 +60,18 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 FInt distSq = dx * dx + dz * dz;
                 if (distSq > _pointZeroOne)
                 {
-                    FInt invDist = FInt.One / FInt.Sqrt(distSq);
+                    FInt invDist = FInt.InvSqrt(distSq);
                     FInt homeX = dx * invDist, homeZ = dz * invDist;
                     FInt randAngle = DeterministicRng.Range(ref state.RngState, -FInt.Pi, FInt.Pi);
                     FInt randX = FInt.Cos(randAngle), randZ = FInt.Sin(randAngle);
                     FInt rawX = homeX * _06 + randX * _04;
                     FInt rawZ = homeZ * _06 + randZ * _04;
-                    FInt len = FInt.Sqrt(rawX * rawX + rawZ * rawZ);
-                    if (len > FInt.Epsilon)
+                    FInt lenSq = FInt.LengthSqr(rawX, rawZ);
+                    if (lenSq > FInt.Epsilon)
                     {
-                        e.DirX = rawX / len;
-                        e.DirZ = rawZ / len;
+                        FInt invLen = FInt.InvSqrt(lenSq);
+                        e.DirX = rawX * invLen;
+                        e.DirZ = rawZ * invLen;
                     }
                 }
                 e.BehaviorTimer = GameState.BatDirChangeInterval;
@@ -90,7 +91,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
             if (distSq > rangeSq && distSq > _pointZeroOne)
             {
-                FInt invDist = FInt.One / FInt.Sqrt(distSq);
+                FInt invDist = FInt.InvSqrt(distSq);
                 e.PosX = e.PosX + dx * invDist * GameState.MageSpeed * dt;
                 e.PosZ = e.PosZ + dz * invDist * GameState.MageSpeed * dt;
             }
@@ -101,7 +102,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
                 int slot = state.AllocProjectile();
                 if (slot >= 0 && distSq > _pointZeroOne)
                 {
-                    FInt invDist = FInt.One / FInt.Sqrt(distSq);
+                    FInt invDist = FInt.InvSqrt(distSq);
                     ref var proj = ref state.Projectiles[slot];
                     proj.IsAlive = true;
                     proj.Type = ProjectileType.BoneShard;

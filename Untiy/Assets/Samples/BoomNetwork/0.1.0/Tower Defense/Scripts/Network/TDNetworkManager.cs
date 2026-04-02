@@ -41,7 +41,7 @@ namespace BoomNetwork.Samples.TowerDefense
         bool _stylesCached;
         GUIStyle _boxStyle, _titleStyle, _labelStyle, _btnStyle, _smallStyle, _btnSelectedStyle;
 
-        static readonly string[] TowerNames  = { "", "Arrow", "Cannon", "Magic" };
+        static readonly string[] TowerNames  = { "", "弓箭塔", "炮台", "魔法塔" };
         static readonly string[] TowerIcons  = { "", "\u2191", "\uD83D\uDCA3", "\u2605" };
         static readonly Color[]  TowerColors =
         {
@@ -202,25 +202,25 @@ namespace BoomNetwork.Samples.TowerDefense
             int alive  = CountAliveEnemies();
             string waveInfo;
             if (state.Wave.AllWavesDone && alive == 0)
-                waveInfo = "<color=yellow>ALL WAVES CLEARED!</color>";
+                waveInfo = "<color=yellow>所有波次已清除！</color>";
             else if (state.Wave.SpawnRemaining > 0)
-                waveInfo = $"Wave <b>{state.Wave.WaveNumber}</b>/{GameState.MaxWaves}  Remaining: {state.Wave.SpawnRemaining}";
+                waveInfo = $"第 <b>{state.Wave.WaveNumber}</b>/{GameState.MaxWaves} 波  剩余敌人：{state.Wave.SpawnRemaining}";
             else
-                waveInfo = $"Wave <b>{state.Wave.WaveNumber}</b>/{GameState.MaxWaves}  Next in: {state.Wave.InterWaveTimer / 30}s";
+                waveInfo = $"第 <b>{state.Wave.WaveNumber}</b>/{GameState.MaxWaves} 波  下波倒计时：{state.Wave.InterWaveTimer / 30}s";
 
             float x = 10, y = 10, w = 340;
             GUI.Box(new Rect(x, y, w, 90), "", _boxStyle);
             y += 5;
             GUI.Label(new Rect(x + 5, y, w, 20),
-                $"<b>Tower Defense</b>  F:{state.FrameNumber}  RTT:{_network.Client.RttMs}ms", _titleStyle);
+                $"<b>塔防守卫</b>  帧：{state.FrameNumber}  延迟：{_network.Client.RttMs}ms", _titleStyle);
             y += 22;
             GUI.Label(new Rect(x + 5, y, w, 20),
-                $"Base HP: <color=#ff8888>{state.BaseHp}</color>/3   Gold: <color=#ffdd44>{state.Gold}</color>", _labelStyle);
+                $"基地血量：<color=#ff8888>{state.BaseHp}</color>/3   金币：<color=#ffdd44>{state.Gold}</color>", _labelStyle);
             y += 22;
             GUI.Label(new Rect(x + 5, y, w, 20), waveInfo, _labelStyle);
             y += 20;
             GUI.Label(new Rect(x + 5, y, w, 16),
-                $"{alive} enemies on screen, 0 extra bandwidth (pure FrameSync)", _smallStyle);
+                $"屏幕上 {alive} 只敌人，帧包大小不变（纯帧同步）", _smallStyle);
         }
 
         void DrawTowerPalette()
@@ -229,7 +229,7 @@ namespace BoomNetwork.Samples.TowerDefense
             GUI.Box(new Rect(px, py, w, h), "", _boxStyle);
             py += 8;
 
-            GUI.Label(new Rect(px + 5, py, w, 18), "Build  [1] Arrow  [2] Cannon  [3] Magic  [S] Sell", _labelStyle);
+            GUI.Label(new Rect(px + 5, py, w, 18), "建造  [1] 弓箭塔  [2] 炮台  [3] 魔法塔  [S] 出售", _labelStyle);
             py += 22;
 
             // Tower buttons
@@ -240,7 +240,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 bool sel  = !_sellMode && _selectedTower == tt;
                 int cost  = GameState.GetTowerCost(tt);
                 bool affordable = _sim.State.Gold >= cost;
-                string label = $"{TowerIcons[i]} {TowerNames[i]}\n<size=10>${cost}</size>";
+                string label = $"{TowerIcons[i]} {TowerNames[i]}\n<size=10>{cost}金</size>";
 
                 GUI.color = affordable ? Color.white : new Color(0.5f, 0.5f, 0.5f);
                 if (GUI.Button(new Rect(bx, py, bw, bh), label, sel ? _btnSelectedStyle : _btnStyle))
@@ -253,14 +253,14 @@ namespace BoomNetwork.Samples.TowerDefense
             }
 
             // Sell button
-            if (GUI.Button(new Rect(bx, py, bw, bh), $"\u2715 Sell\n<size=10>+${GameState.SellRefund}</size>",
+            if (GUI.Button(new Rect(bx, py, bw, bh), $"\u2715 出售\n<size=10>+{GameState.SellRefund}金</size>",
                 _sellMode ? _btnSelectedStyle : _btnStyle))
                 _sellMode = !_sellMode;
 
             py += 40;
             string modeStr = _sellMode
-                ? "<color=red>SELL MODE: click a tower to sell it</color>"
-                : $"Placing: <color=yellow>{TowerNames[(int)_selectedTower]}</color> — click on the map";
+                ? "<color=red>出售模式：点击塔格将其出售</color>"
+                : $"建造：<color=yellow>{TowerNames[(int)_selectedTower]}</color> — 点击地图放置";
             GUI.Label(new Rect(px + 5, py, w, 18), modeStr, _labelStyle);
         }
 
@@ -275,15 +275,15 @@ namespace BoomNetwork.Samples.TowerDefense
                 { fontSize = 18, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
                   normal = { textColor = Color.red }, richText = true };
             GUI.Label(new Rect(px, py, w, h),
-                $"<b>DESYNC DETECTED</b>\nFrame {_desyncFrame}", style);
+                $"<b>检测到不同步</b>\n第 {_desyncFrame} 帧", style);
         }
 
         void DrawGameOverOverlay()
         {
             if (!_sim.IsGameOver()) return;
             string msg = _sim.IsVictory()
-                ? "<color=yellow><b>VICTORY!</b></color>\nAll waves cleared!"
-                : "<color=red><b>BASE DESTROYED</b></color>\nGame over.";
+                ? "<color=yellow><b>胜利！</b></color>\n所有波次已通关！"
+                : "<color=red><b>基地已失守</b></color>\n游戏结束";
 
             float w = 400, h = 80;
             float px = (Screen.width - w) / 2f;

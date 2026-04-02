@@ -34,6 +34,7 @@ namespace BoomNetwork.Samples.VampireSurvivors
         uint _desyncFrame;
         byte _pendingUpgradeChoice;
         bool _firstInputSent;
+        bool _wasUpgrading;
 
         // Cached GUIStyles
         bool _stylesCached;
@@ -97,6 +98,15 @@ namespace BoomNetwork.Samples.VampireSurvivors
             if (h == 0f && v == 0f && ability == 0) return;
             VSInput.Encode(_inputBuf, h, v, ability);
             _network.SendInput(_inputBuf);
+
+            // 升级选择发出后，立即请求恢复帧推送（打破死锁：OnFrame 需要服务器推帧才触发）
+            // 同时重置 _wasUpgrading，确保下一帧能重新检测到新的升级状态（同帧可能再次触发升级）
+            if (ability != 0)
+            {
+                Debug.Log($"[VS] Upgrade choice sent: ability={ability}, IsGamePaused={_network.Client.IsGamePaused}");
+                _wasUpgrading = false;
+                _network.Client.RequestGameResume();
+            }
         }
 
         // ==================== Network Events ====================
@@ -130,7 +140,8 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
             _renderer = GetComponent<VSRenderer>();
             if (_renderer == null) _renderer = gameObject.AddComponent<VSRenderer>();
-            _renderer.Init(_sim.State, _localSlot);
+            float frameIntervalSec = init.FrameInterval / 1000f;
+            _renderer.Init(_sim.State, _localSlot, frameIntervalSec);
 
             Debug.Log($"[VS] FrameSync started. Pid={_network.PlayerId}, Slot={_localSlot}, snapshot={_snapshotLoaded}, dt={dt}, fps={init.FrameRate}");
         }
@@ -180,6 +191,14 @@ namespace BoomNetwork.Samples.VampireSurvivors
 
             uint hash = _sim.State.ComputeHash();
             _network.Client.SendFrameHash(frame.FrameNumber, hash);
+
+            // 检测升级暂停状态变化 → 请求服务器暂停/恢复帧推送
+            bool upgrading = _sim.IsAnyPlayerUpgrading();
+            if (upgrading && !_wasUpgrading)
+                _network.Client.RequestGamePause();
+            else if (!upgrading && _wasUpgrading)
+                _network.Client.RequestGameResume();
+            _wasUpgrading = upgrading;
         }
 
         void OnDesync(FrameHashMismatch mismatch)

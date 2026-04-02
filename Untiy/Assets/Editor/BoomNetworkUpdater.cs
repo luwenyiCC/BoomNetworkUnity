@@ -3,6 +3,7 @@ using System.IO;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.PackageManager;
+using UnityEditor.PackageManager.Requests;
 using UnityEngine;
 
 /// <summary>
@@ -13,11 +14,21 @@ using UnityEngine;
 ///   -executeMethod BoomNetworkUpdater.UpdateAll
 ///   -executeMethod BoomNetworkUpdater.UpdateCore
 ///   -executeMethod BoomNetworkUpdater.UpdateGM
+///
+/// 原理: 与 Package Manager "Update" 按钮完全相同 —— Client.Add(gitUrl)
+///   → UPM 服务端 PUT /project/dependencies/{packageId}
+///   → 清除 lock 条目 → 重新 resolve → 下载 → 域重载
 /// </summary>
 public class BoomNetworkUpdater : EditorWindow
 {
     const string PkgCore = "com.boom.boomnetwork";
     const string PkgGM   = "com.boom.boomnetwork.gm";
+
+    // 当前进行中的请求
+    static AddRequest          s_Request;
+    static Queue<string>       s_PendingUrls;
+    static bool                s_IsBatchMode;
+    static string              s_Status = "";
 
     // ── Menu ─────────────────────────────────────────────────────────────
 
@@ -25,7 +36,7 @@ public class BoomNetworkUpdater : EditorWindow
     static void OpenWindow()
     {
         var win = GetWindow<BoomNetworkUpdater>("BoomNetwork Updater");
-        win.minSize = new Vector2(340, 160);
+        win.minSize = new Vector2(340, 180);
         win.Show();
     }
 
@@ -36,10 +47,14 @@ public class BoomNetworkUpdater : EditorWindow
         EditorGUILayout.Space(8);
         EditorGUILayout.LabelField("BoomNetwork UPM Updater", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "删除 packages-lock.json 中对应条目，强制 Unity 从 GitHub 拉取最新 commit。",
+            "调用 Client.Add(gitUrl)，与 Package Manager 的 Update 按钮行为完全一致：\n" +
+            "清除 lock → 重新从 GitHub dev1.0 拉取 → 触发域重载。",
             MessageType.Info);
         EditorGUILayout.Space(8);
 
+        bool busy = s_Request != null;
+
+        using (new EditorGUI.DisabledScope(busy))
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("Update Core", GUILayout.Height(32)))
@@ -50,121 +65,155 @@ public class BoomNetworkUpdater : EditorWindow
         }
 
         EditorGUILayout.Space(4);
-        if (GUILayout.Button("Update Both", GUILayout.Height(36)))
-            RunWithConfirm(PkgCore, PkgGM);
+
+        using (new EditorGUI.DisabledScope(busy))
+        {
+            if (GUILayout.Button("Update Both", GUILayout.Height(36)))
+                RunWithConfirm(PkgCore, PkgGM);
+        }
+
+        if (!string.IsNullOrEmpty(s_Status))
+        {
+            EditorGUILayout.Space(6);
+            EditorGUILayout.HelpBox(s_Status, MessageType.None);
+        }
     }
 
-    static void RunWithConfirm(params string[] packages)
+    void OnInspectorUpdate() => Repaint();
+
+    static void RunWithConfirm(params string[] packageNames)
     {
-        string list = string.Join("\n  • ", packages);
+        string list = string.Join("\n  • ", packageNames);
         bool ok = EditorUtility.DisplayDialog(
             "BoomNetwork Updater",
-            $"将强制重新拉取以下包：\n  • {list}\n\nUnity 会短暂编译，确认继续？",
+            $"将强制重新拉取以下包：\n  • {list}\n\nUnity 会重新编译，确认继续？",
             "Update", "Cancel");
         if (ok)
-            ForceUpdate(packages);
+            StartUpdate(packageNames, batchMode: false);
     }
 
-    // ── Core logic ───────────────────────────────────────────────────────
+    // ── Core: Client.Add 链式队列 ─────────────────────────────────────────
 
-    /// <summary>从 packages-lock.json 中移除指定包的 hash，触发 Unity 重新解析。</summary>
-    static void ForceUpdate(string[] packages)
+    static void StartUpdate(string[] packageNames, bool batchMode)
     {
-        string lockPath = Path.GetFullPath(
-            Path.Combine(Application.dataPath, "../Packages/packages-lock.json"));
+        var manifest = ReadManifest();
+        if (manifest == null) return;
 
-        if (!File.Exists(lockPath))
+        s_PendingUrls = new Queue<string>();
+        s_IsBatchMode = batchMode;
+
+        foreach (string name in packageNames)
         {
-            Debug.LogError($"[BoomNetworkUpdater] 找不到 {lockPath}");
-            return;
-        }
-
-        string json = File.ReadAllText(lockPath);
-        var removedList = new List<string>();
-
-        foreach (string pkg in packages)
-        {
-            string before = json;
-            json = RemovePackageEntry(json, pkg);
-            if (json != before)
-                removedList.Add(pkg);
+            if (manifest.TryGetValue(name, out string url))
+                s_PendingUrls.Enqueue(url);
             else
-                Debug.LogWarning($"[BoomNetworkUpdater] {pkg} 不在 lock 文件中，跳过。");
+                Debug.LogWarning($"[BoomNetworkUpdater] {name} 不在 manifest.json 中，跳过。");
         }
 
-        if (removedList.Count == 0)
+        ProcessNextInQueue();
+    }
+
+    static void ProcessNextInQueue()
+    {
+        if (s_PendingUrls == null || s_PendingUrls.Count == 0)
         {
-            Debug.Log("[BoomNetworkUpdater] 无需更新（包条目已不存在）。");
+            s_Request = null;
+            s_Status = "完成。等待 Unity 重新编译…";
+            Debug.Log("[BoomNetworkUpdater] 所有包已提交更新，等待域重载。");
+            if (s_IsBatchMode)
+                EditorApplication.Exit(0);
             return;
         }
 
-        File.WriteAllText(lockPath, json);
-        Debug.Log($"[BoomNetworkUpdater] 已移除 lock 条目：{string.Join(", ", removedList)}");
+        string url = s_PendingUrls.Dequeue();
+        s_Status = $"正在更新: {url}";
+        Debug.Log($"[BoomNetworkUpdater] Client.Add({url})");
 
-        // 触发 PackageManager 重新解析
-        Client.Resolve();
-        Debug.Log("[BoomNetworkUpdater] PackageManager.Client.Resolve() 已触发，请等待编译完成。");
+        s_Request = Client.Add(url);
+        EditorApplication.update += OnUpdate;
     }
 
-    /// <summary>
-    /// 从 JSON 文本中删除 "pkgName": { ... } 块（简单字符串处理，不引入 JSON 库）。
-    /// </summary>
-    static string RemovePackageEntry(string json, string pkg)
+    static void OnUpdate()
     {
-        // 找到 "com.xxx.xxx": {
-        string key = $"\"{pkg}\"";
-        int keyIdx = json.IndexOf(key, StringComparison.Ordinal);
-        if (keyIdx < 0) return json;
+        if (s_Request == null || !s_Request.IsCompleted) return;
 
-        // 找到冒号后的 {
-        int braceStart = json.IndexOf('{', keyIdx + key.Length);
-        if (braceStart < 0) return json;
+        EditorApplication.update -= OnUpdate;
 
-        // 匹配对应的 }
-        int depth = 0;
-        int braceEnd = -1;
-        for (int i = braceStart; i < json.Length; i++)
-        {
-            if (json[i] == '{') depth++;
-            else if (json[i] == '}')
-            {
-                depth--;
-                if (depth == 0) { braceEnd = i; break; }
-            }
-        }
-        if (braceEnd < 0) return json;
-
-        // 计算要删除的范围（含前面的逗号或后面的逗号）
-        int removeStart = keyIdx;
-        int removeEnd   = braceEnd + 1;
-
-        // 往前吃掉前置逗号+空白
-        int lookBack = removeStart - 1;
-        while (lookBack >= 0 && (json[lookBack] == ' ' || json[lookBack] == '\t' || json[lookBack] == '\r' || json[lookBack] == '\n'))
-            lookBack--;
-        if (lookBack >= 0 && json[lookBack] == ',')
-            removeStart = lookBack;
+        if (s_Request.Status == StatusCode.Success)
+            Debug.Log($"[BoomNetworkUpdater] 更新成功: {s_Request.Result.packageId}");
         else
+            Debug.LogError($"[BoomNetworkUpdater] 更新失败: {s_Request.Error?.message}");
+
+        s_Request = null;
+        ProcessNextInQueue();
+    }
+
+    // ── manifest.json 读取 ───────────────────────────────────────────────
+
+    /// <summary>返回 packageName → gitUrl 的字典。</summary>
+    static Dictionary<string, string> ReadManifest()
+    {
+        string path = Path.GetFullPath(
+            Path.Combine(Application.dataPath, "../Packages/manifest.json"));
+
+        if (!File.Exists(path))
         {
-            // 尝试吃掉后置逗号+空白
-            int lookAhead = removeEnd;
-            while (lookAhead < json.Length && (json[lookAhead] == ' ' || json[lookAhead] == '\t' || json[lookAhead] == '\r' || json[lookAhead] == '\n'))
-                lookAhead++;
-            if (lookAhead < json.Length && json[lookAhead] == ',')
-                removeEnd = lookAhead + 1;
+            Debug.LogError($"[BoomNetworkUpdater] 找不到 {path}");
+            return null;
         }
 
-        return json.Remove(removeStart, removeEnd - removeStart);
+        // 用简单字符串解析取出 dependencies 块
+        string text = File.ReadAllText(path);
+        var result  = new Dictionary<string, string>();
+
+        // 找 "dependencies" : { ... }
+        int depIdx = text.IndexOf("\"dependencies\"", StringComparison.Ordinal);
+        if (depIdx < 0) return result;
+
+        int braceStart = text.IndexOf('{', depIdx);
+        if (braceStart < 0) return result;
+
+        // 提取 dependencies 块内所有 "key": "value" 对
+        int i = braceStart + 1;
+        int depth = 1;
+        while (i < text.Length && depth > 0)
+        {
+            if (text[i] == '{') { depth++; i++; continue; }
+            if (text[i] == '}') { depth--; i++; continue; }
+
+            if (depth == 1 && text[i] == '"')
+            {
+                // 读 key
+                int keyEnd = text.IndexOf('"', i + 1);
+                if (keyEnd < 0) break;
+                string key = text.Substring(i + 1, keyEnd - i - 1);
+                i = keyEnd + 1;
+
+                // 跳到下一个 "
+                int valStart = text.IndexOf('"', i);
+                if (valStart < 0) break;
+                int valEnd = text.IndexOf('"', valStart + 1);
+                if (valEnd < 0) break;
+                string val = text.Substring(valStart + 1, valEnd - valStart - 1);
+                i = valEnd + 1;
+
+                result[key] = val;
+                continue;
+            }
+            i++;
+        }
+
+        return result;
     }
 
     // ── CLI entry points ─────────────────────────────────────────────────
 
     /// <summary>CLI: 同时更新 Core + GM</summary>
-    public static void UpdateAll()  => ForceUpdate(new[] { PkgCore, PkgGM });
+    public static void UpdateAll()  => StartUpdate(new[] { PkgCore, PkgGM }, batchMode: true);
 
     /// <summary>CLI: 只更新 Core</summary>
-    public static void UpdateCore() => ForceUpdate(new[] { PkgCore });
+    public static void UpdateCore() => StartUpdate(new[] { PkgCore }, batchMode: true);
 
     /// <summary>CLI: 只更新 GM</summary>
-    public static void UpdateGM()   => ForceUpdate(new[] { PkgGM });
+    public static void UpdateGM()   => StartUpdate(new[] { PkgGM }, batchMode: true);
 }

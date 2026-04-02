@@ -1,7 +1,8 @@
 // BoomNetwork TowerDefense Demo — Tower Attack Logic (Fixed-Point)
 //
 // Arrow: nearest enemy in range, single target.
-// Cannon: nearest enemy, AoE blast on hit (all enemies within blast radius).
+// Cannon: FARTHEST enemy in range (artillery style), AoE blast.
+//         Ignores enemies within CannonMinRange — prevents "shoot own feet".
 // Magic: nearest enemy, single target + SlowFrames.
 //
 // All arithmetic uses FInt. No floating-point in simulation.
@@ -32,10 +33,13 @@ namespace BoomNetwork.Samples.TowerDefense
                     FInt range   = GameState.GetTowerRange(tower.Type, tower.Level);
                     FInt rangeSq = range * range;
 
-                    int target = FindNearest(state, towerX, towerZ, rangeSq);
-                    if (target < 0) continue;
-
                     int lvl = tower.Level;
+
+                    // Cannon uses farthest-in-range targeting (artillery)
+                    int target = tower.Type == TowerType.Cannon
+                        ? FindFarthest(state, towerX, towerZ, rangeSq)
+                        : FindNearest(state, towerX, towerZ, rangeSq);
+                    if (target < 0) continue;
 
                     // Fire
                     switch (tower.Type)
@@ -58,6 +62,34 @@ namespace BoomNetwork.Samples.TowerDefense
                     tower.CooldownFrames = GameState.GetTowerCooldown(tower.Type, tower.Level);
                 }
             }
+        }
+
+        // Cannon minimum range: 2.0 grid units (raw = 2 * 1024 = 2048 in 22.10)
+        // Enemies closer than this are NOT targeted as the primary shot — they still
+        // receive AoE splash damage when a farther target is hit.
+        static readonly FInt CannonMinRangeSq = new FInt(2048) * new FInt(2048); // 2.0^2
+
+        // Pick the farthest alive enemy in [minRange, maxRange].
+        // If nothing is in that band, fall back to the nearest within range.
+        static int FindFarthest(GameState state, FInt towerX, FInt towerZ, FInt rangeSq)
+        {
+            int best = -1;
+            FInt bestDist = CannonMinRangeSq; // must be at least this far
+            for (int i = 0; i < GameState.MaxEnemies; i++)
+            {
+                ref var e = ref state.Enemies[i];
+                if (!e.IsAlive) continue;
+                FInt dSq = FInt.DistanceSqr(towerX, towerZ, e.PosX, e.PosZ);
+                if (dSq <= rangeSq && dSq > bestDist)
+                {
+                    bestDist = dSq;
+                    best = i;
+                }
+            }
+            // Fallback: if every enemy is too close, pick nearest (AoE still helps)
+            if (best < 0)
+                best = FindNearest(state, towerX, towerZ, rangeSq);
+            return best;
         }
 
         static int FindNearest(GameState state, FInt towerX, FInt towerZ, FInt rangeSq)

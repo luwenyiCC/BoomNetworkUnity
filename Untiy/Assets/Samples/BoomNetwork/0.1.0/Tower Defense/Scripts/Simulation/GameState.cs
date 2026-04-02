@@ -63,7 +63,8 @@ namespace BoomNetwork.Samples.TowerDefense
 
         // Arrow/Magic range in grid units (FInt)
         public static readonly FInt ArrowRange  = FInt.FromInt(3);
-        public static readonly FInt CannonRange = FInt.FromInt(5); // 原 2 格太近，看起来打自己
+        public static readonly FInt CannonRange    = FInt.FromInt(8);
+        public static readonly FInt CannonMinRange = FInt.FromInt(3); // 3 格以内不瞄准
         public static readonly FInt MagicRange  = FInt.FromInt(4);
 
         // AoE blast radius for Cannon (grid units)

@@ -64,17 +64,16 @@ namespace BoomNetwork.Samples.TowerDefense
             }
         }
 
-        // Cannon minimum range: 2.0 grid units (raw = 2 * 1024 = 2048 in 22.10)
-        // Enemies closer than this are NOT targeted as the primary shot — they still
-        // receive AoE splash damage when a farther target is hit.
-        static readonly FInt CannonMinRangeSq = new FInt(2048) * new FInt(2048); // 2.0^2
+        // Cannon only targets enemies in [3, maxRange] grid units.
+        // Enemies closer than 3 cells are never the primary target (no "shoot own feet").
+        // They still take AoE splash if a valid distant target is hit.
+        static readonly FInt CannonMinRangeSq =
+            GameState.CannonMinRange * GameState.CannonMinRange; // 3^2 = 9
 
-        // Pick the farthest alive enemy in [minRange, maxRange].
-        // If nothing is in that band, fall back to the nearest within range.
         static int FindFarthest(GameState state, FInt towerX, FInt towerZ, FInt rangeSq)
         {
             int best = -1;
-            FInt bestDist = CannonMinRangeSq; // must be at least this far
+            FInt bestDist = CannonMinRangeSq; // lower bound: must exceed 3 grid units
             for (int i = 0; i < GameState.MaxEnemies; i++)
             {
                 ref var e = ref state.Enemies[i];
@@ -86,10 +85,7 @@ namespace BoomNetwork.Samples.TowerDefense
                     best = i;
                 }
             }
-            // Fallback: if every enemy is too close, pick nearest (AoE still helps)
-            if (best < 0)
-                best = FindNearest(state, towerX, towerZ, rangeSq);
-            return best;
+            return best; // -1 if no enemy in the valid band — cannon simply waits
         }
 
         static int FindNearest(GameState state, FInt towerX, FInt towerZ, FInt rangeSq)

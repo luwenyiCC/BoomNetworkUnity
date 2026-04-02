@@ -2,12 +2,12 @@
 //
 // Top-down orthographic view. Color-coded Quads and Cubes, no external art assets.
 //
-// Attack Effects (pure visual, no simulation state):
-//   Arrow  — 黄色细长条从塔飞向目标，8 帧
-//   Cannon — 橙色爆炸球在命中点膨胀收缩，12 帧
-//   Magic  — 紫色光环在目标位置脉冲，10 帧
+// 攻击特效（纯视觉层，不影响模拟状态）：
+//   弓箭塔 — 黄色细长 Cube 从塔飞向目标，8 帧
+//   炮台   — 两阶段：橙色 Sphere 炮弹飞行（前 10 帧）+ 橙红爆炸球膨胀（后 8 帧），共 18 帧
+//   魔法塔 — 紫色 Sphere 在目标处 sin 脉冲，10 帧
 //
-// TryGetGridCell(): analytic ray/y=0 plane intersection for mouse click.
+// 三个独立 FX 池，避免几何体混用。
 
 using UnityEngine;
 
@@ -23,34 +23,57 @@ namespace BoomNetwork.Samples.TowerDefense
         Material _matGround, _matGridLine, _matBase;
         Material _matArrow, _matCannon, _matMagic;
         Material _matBasic, _matFast, _matTank, _matBasicSlow;
-        Material _matFxArrow, _matFxCannon, _matFxMagic;
+        Material _matFxArrow, _matFxBall, _matFxExplosion, _matFxMagic;
 
-        // ==================== Tower pool ====================
+        // ==================== Tower / Enemy pools ====================
         GameObject[] _towerObjs = new GameObject[GameState.GridSize];
         Renderer[]   _towerRend = new Renderer[GameState.GridSize];
-
-        // ==================== Enemy pool ====================
         GameObject[] _enemyObjs = new GameObject[GameState.MaxEnemies];
         Renderer[]   _enemyRend = new Renderer[GameState.MaxEnemies];
 
-        // ==================== Attack effects ====================
-        // 纯视觉层，不影响模拟状态
-        const int FxPoolSize = 64;
+        // ==================== 弓箭塔 FX（Cube） ====================
+        const int ArrowFxPool = 24;
 
-        struct AttackEffect
+        struct ArrowEffect
         {
             public bool      Active;
-            public TowerType Type;
-            public Vector3   Origin;   // 塔中心世界坐标
-            public Vector3   Target;   // 命中点世界坐标
-            public int       FramesTotal;
+            public Vector3   Origin, Target;
             public int       FramesLeft;
-            public GameObject Obj;     // 主视觉体
+            public GameObject Obj;
         }
 
-        AttackEffect[] _fx = new AttackEffect[FxPoolSize];
+        ArrowEffect[] _arrowFx = new ArrowEffect[ArrowFxPool];
 
-        // Shadow copy：检测塔开火时刻（cooldown 跳到最大值）
+        // ==================== 炮台 FX（Sphere ×2） ====================
+        // 飞行弹 + 爆炸球各自独立生命周期
+        const int CannonFxPool = 12;
+
+        struct CannonBall
+        {
+            public bool      Active;
+            public Vector3   Origin, Target;
+            public int       FramesTotal, FramesLeft;
+            public GameObject Ball;       // 飞行炮弹 Sphere
+            public GameObject Explosion;  // 爆炸球 Sphere
+            public bool      Exploded;    // 是否已进入爆炸阶段
+        }
+
+        CannonBall[] _cannonFx = new CannonBall[CannonFxPool];
+
+        // ==================== 魔法塔 FX（Sphere） ====================
+        const int MagicFxPool = 16;
+
+        struct MagicEffect
+        {
+            public bool      Active;
+            public Vector3   Target;
+            public int       FramesTotal, FramesLeft;
+            public GameObject Obj;
+        }
+
+        MagicEffect[] _magicFx = new MagicEffect[MagicFxPool];
+
+        // ==================== Shadow copy ====================
         int[] _prevCooldown = new int[GameState.GridSize];
 
         // ==================== Camera ====================
@@ -72,7 +95,9 @@ namespace BoomNetwork.Samples.TowerDefense
             CreateBase();
             CreateTowerPool();
             CreateEnemyPool();
-            CreateFxPool();
+            CreateArrowFxPool();
+            CreateCannonFxPool();
+            CreateMagicFxPool();
 
             for (int i = 0; i < GameState.GridSize; i++) _prevCooldown[i] = 0;
         }
@@ -84,7 +109,9 @@ namespace BoomNetwork.Samples.TowerDefense
             if (!_initialized || _state == null) return;
             SyncTowers();
             SyncEnemies();
-            TickFx();
+            TickArrowFx();
+            TickCannonFx();
+            TickMagicFx();
             CaptureFrameShadow();
         }
 
@@ -106,25 +133,24 @@ namespace BoomNetwork.Samples.TowerDefense
                     case TowerType.Magic:  _towerRend[i].sharedMaterial = _matMagic;  break;
                 }
 
-                // 检测开火：cooldown 本帧跳回满值 → 上一帧是 1，刚才打出了一发
+                // 开火检测：cooldown 本帧刚跳回最大值
                 int maxCd = GameState.GetTowerCooldown(t.Type);
                 if (t.CooldownFrames == maxCd && _prevCooldown[i] < maxCd)
                 {
                     int cx = i % GameState.GridW;
                     int cy = i / GameState.GridW;
-                    Vector3 origin = new Vector3(cx + 0.5f, 0.6f, cy + 0.5f);
+                    Vector3 origin = new Vector3(cx + 0.5f, 0.8f, cy + 0.5f);
                     Vector3 target = FindNearestEnemyPos(origin, GameState.GetTowerRange(t.Type).ToFloat());
                     SpawnFx(t.Type, origin, target);
                 }
             }
         }
 
-        // 在渲染层找最近存活敌人（只读，不改状态）
         Vector3 FindNearestEnemyPos(Vector3 towerPos, float range)
         {
-            float rangeSq = range * range;
+            float rangeSq  = range * range;
             float bestDist = float.MaxValue;
-            Vector3 best = towerPos; // 没找到就在塔上原地闪
+            Vector3 best   = towerPos;
             for (int i = 0; i < GameState.MaxEnemies; i++)
             {
                 ref var e = ref _state.Enemies[i];
@@ -139,6 +165,16 @@ namespace BoomNetwork.Samples.TowerDefense
                 }
             }
             return best;
+        }
+
+        void SpawnFx(TowerType type, Vector3 origin, Vector3 target)
+        {
+            switch (type)
+            {
+                case TowerType.Arrow:  SpawnArrow(origin, target);  break;
+                case TowerType.Cannon: SpawnCannon(origin, target); break;
+                case TowerType.Magic:  SpawnMagic(target);          break;
+            }
         }
 
         // ==================== SyncEnemies ====================
@@ -172,47 +208,28 @@ namespace BoomNetwork.Samples.TowerDefense
             }
         }
 
-        // ==================== Attack Effects ====================
+        // ==================== 弓箭塔特效 ====================
 
-        void SpawnFx(TowerType type, Vector3 origin, Vector3 target)
+        void SpawnArrow(Vector3 origin, Vector3 target)
         {
-            for (int i = 0; i < FxPoolSize; i++)
+            for (int i = 0; i < ArrowFxPool; i++)
             {
-                ref var f = ref _fx[i];
+                ref var f = ref _arrowFx[i];
                 if (f.Active) continue;
-
-                f.Active      = true;
-                f.Type        = type;
-                f.Origin      = origin;
-                f.Target      = target;
-
-                switch (type)
-                {
-                    case TowerType.Arrow:
-                        f.FramesTotal = 8;
-                        f.Obj.GetComponent<Renderer>().sharedMaterial = _matFxArrow;
-                        break;
-                    case TowerType.Cannon:
-                        f.FramesTotal = 12;
-                        f.Obj.GetComponent<Renderer>().sharedMaterial = _matFxCannon;
-                        break;
-                    case TowerType.Magic:
-                        f.FramesTotal = 10;
-                        f.Obj.GetComponent<Renderer>().sharedMaterial = _matFxMagic;
-                        break;
-                }
-
-                f.FramesLeft = f.FramesTotal;
+                f.Active     = true;
+                f.Origin     = origin;
+                f.Target     = target;
+                f.FramesLeft = 8;
                 f.Obj.SetActive(true);
                 return;
             }
         }
 
-        void TickFx()
+        void TickArrowFx()
         {
-            for (int i = 0; i < FxPoolSize; i++)
+            for (int i = 0; i < ArrowFxPool; i++)
             {
-                ref var f = ref _fx[i];
+                ref var f = ref _arrowFx[i];
                 if (!f.Active) continue;
 
                 f.FramesLeft--;
@@ -223,62 +240,133 @@ namespace BoomNetwork.Samples.TowerDefense
                     continue;
                 }
 
-                float t = 1f - (float)f.FramesLeft / f.FramesTotal; // 0→1 进度
+                float t   = 1f - f.FramesLeft / 8f; // 0→1
+                Vector3 pos = Vector3.Lerp(f.Origin, f.Target, t);
+                f.Obj.transform.position = pos;
 
-                switch (f.Type)
+                Vector3 dir = f.Target - f.Origin;
+                if (dir.sqrMagnitude > 0.001f)
+                    f.Obj.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+
+                float len = Mathf.Max(0.2f, dir.magnitude * 0.4f);
+                f.Obj.transform.localScale = new Vector3(0.1f, 0.1f, len);
+            }
+        }
+
+        // ==================== 炮台特效 ====================
+        // 两阶段：飞行炮弹（10 帧）→ 爆炸膨胀（8 帧）
+
+        const int CannonTravelFrames    = 10;
+        const int CannonExplosionFrames = 8;
+
+        void SpawnCannon(Vector3 origin, Vector3 target)
+        {
+            for (int i = 0; i < CannonFxPool; i++)
+            {
+                ref var f = ref _cannonFx[i];
+                if (f.Active) continue;
+                f.Active      = true;
+                f.Origin      = origin;
+                f.Target      = target;
+                f.FramesTotal = CannonTravelFrames;
+                f.FramesLeft  = CannonTravelFrames;
+                f.Exploded    = false;
+                f.Ball.SetActive(true);
+                f.Explosion.SetActive(false);
+                f.Ball.transform.position   = origin;
+                f.Ball.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+                return;
+            }
+        }
+
+        void TickCannonFx()
+        {
+            for (int i = 0; i < CannonFxPool; i++)
+            {
+                ref var f = ref _cannonFx[i];
+                if (!f.Active) continue;
+
+                f.FramesLeft--;
+
+                if (!f.Exploded)
                 {
-                    case TowerType.Arrow:
-                        UpdateArrowFx(ref f, t);
-                        break;
-                    case TowerType.Cannon:
-                        UpdateCannonFx(ref f, t);
-                        break;
-                    case TowerType.Magic:
-                        UpdateMagicFx(ref f, t);
-                        break;
+                    // 飞行阶段：炮弹从 Origin 飞向 Target
+                    float t = 1f - (float)f.FramesLeft / f.FramesTotal;
+                    f.Ball.transform.position = Vector3.Lerp(f.Origin, f.Target, t);
+
+                    if (f.FramesLeft <= 0)
+                    {
+                        // 切换到爆炸阶段
+                        f.Exploded    = true;
+                        f.FramesTotal = CannonExplosionFrames;
+                        f.FramesLeft  = CannonExplosionFrames;
+                        f.Ball.SetActive(false);
+                        f.Explosion.transform.position   = f.Target;
+                        f.Explosion.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
+                        f.Explosion.SetActive(true);
+                    }
+                }
+                else
+                {
+                    // 爆炸阶段：球体快速膨胀再收缩
+                    float t = 1f - (float)f.FramesLeft / f.FramesTotal; // 0→1
+                    float s;
+                    if (t < 0.45f)
+                        s = Mathf.Lerp(0.3f, 3.5f, t / 0.45f);   // 膨胀
+                    else
+                        s = Mathf.Lerp(3.5f, 0.1f, (t - 0.45f) / 0.55f); // 收缩
+                    f.Explosion.transform.localScale = new Vector3(s, s * 0.5f, s);
+
+                    if (f.FramesLeft <= 0)
+                    {
+                        f.Active = false;
+                        f.Explosion.SetActive(false);
+                    }
                 }
             }
         }
 
-        // Arrow：细长条从塔飞向目标，沿途拉伸，抵达目标后消失
-        void UpdateArrowFx(ref AttackEffect f, float t)
+        // ==================== 魔法塔特效 ====================
+
+        void SpawnMagic(Vector3 target)
         {
-            // 当前位置 = 从 Origin 飞向 Target
-            Vector3 pos = Vector3.Lerp(f.Origin, f.Target, t);
-            f.Obj.transform.position = pos;
-
-            // 朝向：指向 Target 方向
-            Vector3 dir = f.Target - f.Origin;
-            if (dir.sqrMagnitude > 0.001f)
-                f.Obj.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
-
-            // 长度 = 飞行距离的 1/3（拖尾感），宽度固定
-            float len = Mathf.Max(0.15f, dir.magnitude * 0.35f);
-            f.Obj.transform.localScale = new Vector3(0.08f, 0.08f, len);
+            for (int i = 0; i < MagicFxPool; i++)
+            {
+                ref var f = ref _magicFx[i];
+                if (f.Active) continue;
+                f.Active      = true;
+                f.Target      = target;
+                f.FramesTotal = 10;
+                f.FramesLeft  = 10;
+                f.Obj.SetActive(true);
+                f.Obj.transform.position = target;
+                return;
+            }
         }
 
-        // Cannon：爆炸球在命中点膨胀 → 收缩
-        // t: 0 = 开始, 1 = 结束
-        void UpdateCannonFx(ref AttackEffect f, float t)
+        void TickMagicFx()
         {
-            f.Obj.transform.position = f.Target;
-            // 先膨胀到最大（t=0.4）再收缩
-            float s;
-            if (t < 0.4f)
-                s = Mathf.Lerp(0f, 1.8f, t / 0.4f);
-            else
-                s = Mathf.Lerp(1.8f, 0f, (t - 0.4f) / 0.6f);
-            f.Obj.transform.localScale = new Vector3(s, s * 0.4f, s);
+            for (int i = 0; i < MagicFxPool; i++)
+            {
+                ref var f = ref _magicFx[i];
+                if (!f.Active) continue;
+
+                f.FramesLeft--;
+                if (f.FramesLeft <= 0)
+                {
+                    f.Active = false;
+                    f.Obj.SetActive(false);
+                    continue;
+                }
+
+                float t     = 1f - (float)f.FramesLeft / f.FramesTotal;
+                float pulse = Mathf.Sin(t * Mathf.PI); // 0→1→0
+                float s     = 0.15f + pulse * 1.0f;
+                f.Obj.transform.localScale = new Vector3(s, s * 0.3f, s); // 扁平光环
+            }
         }
 
-        // Magic：紫色光环在目标处脉冲，缩放 sin 波
-        void UpdateMagicFx(ref AttackEffect f, float t)
-        {
-            f.Obj.transform.position = f.Target;
-            float pulse = Mathf.Sin(t * Mathf.PI); // 0→1→0
-            float s = 0.2f + pulse * 0.8f;
-            f.Obj.transform.localScale = new Vector3(s, s, s);
-        }
+        // ==================== Shadow copy ====================
 
         void CaptureFrameShadow()
         {
@@ -323,10 +411,10 @@ namespace BoomNetwork.Samples.TowerDefense
             _matTank      = new Material(sh) { color = new Color(0.5f, 0.1f, 0.1f) };
             _matBasicSlow = new Material(sh) { color = new Color(0.4f, 0.4f, 0.9f) };
 
-            // 攻击特效材质
-            _matFxArrow  = new Material(sh) { color = new Color(1.0f, 0.95f, 0.3f) }; // 明黄
-            _matFxCannon = new Material(sh) { color = new Color(1.0f, 0.45f, 0.05f) }; // 橙红爆炸
-            _matFxMagic  = new Material(sh) { color = new Color(0.75f, 0.3f, 1.0f) };  // 紫光
+            _matFxArrow     = new Material(sh) { color = new Color(1.0f, 0.95f, 0.3f) };  // 明黄箭矢
+            _matFxBall      = new Material(sh) { color = new Color(0.2f, 0.2f, 0.2f) };   // 深色炮弹
+            _matFxExplosion = new Material(sh) { color = new Color(1.0f, 0.40f, 0.05f) }; // 橙红爆炸
+            _matFxMagic     = new Material(sh) { color = new Color(0.75f, 0.3f, 1.0f) };  // 紫光
         }
 
         void CreateCamera()
@@ -438,19 +526,55 @@ namespace BoomNetwork.Samples.TowerDefense
             }
         }
 
-        void CreateFxPool()
+        void CreateArrowFxPool()
         {
-            for (int i = 0; i < FxPoolSize; i++)
+            for (int i = 0; i < ArrowFxPool; i++)
             {
-                // Arrow 用细长 Cube，Cannon/Magic 用 Sphere
-                // 类型在 SpawnFx 时才确定，统一用 Cube（用途广）
                 var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                obj.name = "TD_Fx";
+                obj.name = "TD_ArrowFx";
                 obj.transform.SetParent(transform);
-                obj.transform.localScale = Vector3.one * 0.1f;
+                obj.GetComponent<Renderer>().sharedMaterial = _matFxArrow;
                 DestroyCollider(obj);
                 obj.SetActive(false);
-                _fx[i] = new AttackEffect { Obj = obj };
+                _arrowFx[i] = new ArrowEffect { Obj = obj };
+            }
+        }
+
+        void CreateCannonFxPool()
+        {
+            for (int i = 0; i < CannonFxPool; i++)
+            {
+                // 炮弹球
+                var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                ball.name = "TD_CannonBall";
+                ball.transform.SetParent(transform);
+                ball.GetComponent<Renderer>().sharedMaterial = _matFxBall;
+                DestroyCollider(ball);
+                ball.SetActive(false);
+
+                // 爆炸球（单独实例，比炮弹大得多）
+                var expl = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                expl.name = "TD_CannonExpl";
+                expl.transform.SetParent(transform);
+                expl.GetComponent<Renderer>().sharedMaterial = _matFxExplosion;
+                DestroyCollider(expl);
+                expl.SetActive(false);
+
+                _cannonFx[i] = new CannonBall { Ball = ball, Explosion = expl };
+            }
+        }
+
+        void CreateMagicFxPool()
+        {
+            for (int i = 0; i < MagicFxPool; i++)
+            {
+                var obj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                obj.name = "TD_MagicFx";
+                obj.transform.SetParent(transform);
+                obj.GetComponent<Renderer>().sharedMaterial = _matFxMagic;
+                DestroyCollider(obj);
+                obj.SetActive(false);
+                _magicFx[i] = new MagicEffect { Obj = obj };
             }
         }
 
@@ -465,7 +589,7 @@ namespace BoomNetwork.Samples.TowerDefense
             Destroy(_matGround); Destroy(_matGridLine); Destroy(_matBase);
             Destroy(_matArrow); Destroy(_matCannon); Destroy(_matMagic);
             Destroy(_matBasic); Destroy(_matFast); Destroy(_matTank); Destroy(_matBasicSlow);
-            Destroy(_matFxArrow); Destroy(_matFxCannon); Destroy(_matFxMagic);
+            Destroy(_matFxArrow); Destroy(_matFxBall); Destroy(_matFxExplosion); Destroy(_matFxMagic);
         }
     }
 }

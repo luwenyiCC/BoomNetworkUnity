@@ -13,6 +13,7 @@ namespace BoomNetwork.Samples.TowerDefense
     {
         public TowerType Type;      // 0 = empty cell
         public int CooldownFrames;  // frames until next attack
+        public int Level;           // 1-3 (0 when empty)
     }
 
     public struct Enemy
@@ -73,7 +74,24 @@ namespace BoomNetwork.Samples.TowerDefense
         public const int MagicDamage  = 1;
         public const int MagicSlowFrames = 60;
 
-        public const int SellRefund = 25; // flat refund for any tower
+        // Upgrade cost: L1→L2 = base cost, L2→L3 = 2× base cost
+        public static int GetTowerUpgradeCost(TowerType t, int currentLevel)
+        {
+            int baseCost = GetTowerCost(t);
+            return currentLevel == 1 ? baseCost : baseCost * 2;
+        }
+
+        // Sell refund = 50% of total invested gold
+        public static int GetSellRefund(TowerType t, int level)
+        {
+            int baseCost = GetTowerCost(t);
+            int total = baseCost;
+            if (level >= 2) total += GetTowerUpgradeCost(t, 1);
+            if (level >= 3) total += GetTowerUpgradeCost(t, 2);
+            return total / 2;
+        }
+
+        public const int MaxTowerLevel = 3;
 
         // ==================== Enemy params ====================
         // Speed in FInt units per frame (grid/frame)
@@ -160,10 +178,47 @@ namespace BoomNetwork.Samples.TowerDefense
             switch (t) { case TowerType.Cannon: return CannonRange; case TowerType.Magic: return MagicRange; default: return ArrowRange; }
         }
 
+        // Level-aware range: each level adds 0.5 grid units
+        public static FInt GetTowerRange(TowerType t, int level)
+        {
+            FInt baseRange = GetTowerRange(t);
+            if (level <= 1) return baseRange;
+            // 512 raw = 0.5 in 22.10 fixed-point
+            return new FInt(baseRange.Raw + (level - 1) * 512);
+        }
+
         public static int GetTowerCooldown(TowerType t)
         {
             switch (t) { case TowerType.Cannon: return CannonCooldown; case TowerType.Magic: return MagicCooldown; default: return ArrowCooldown; }
         }
+
+        // Level-aware cooldown: each level reduces by 20% of base
+        public static int GetTowerCooldown(TowerType t, int level)
+        {
+            int baseCd = GetTowerCooldown(t);
+            return baseCd - (level - 1) * (baseCd / 5);
+        }
+
+        // Level-aware damage: Arrow 1/2/3, Cannon 3/5/7, Magic 1/2/3
+        public static int GetTowerDamage(TowerType t, int level)
+        {
+            switch (t)
+            {
+                case TowerType.Cannon: return 1 + level * 2;  // 3/5/7
+                default:               return level;           // 1/2/3
+            }
+        }
+
+        // Level-aware AoE radius: +0.4 per level
+        public static FInt GetCannonAoeRadius(int level)
+        {
+            if (level <= 1) return CannonAoeRadius;
+            // 410 raw ≈ 0.4 in 22.10
+            return new FInt(CannonAoeRadius.Raw + (level - 1) * 410);
+        }
+
+        // Level-aware magic slow: 60 / 90 / 120 frames
+        public static int GetMagicSlowFrames(int level) => MagicSlowFrames + (level - 1) * 30;
 
         // Cell center in world coords (cells start at 0,0 top-left)
         public static FInt CellCenterX(int cx) => FInt.FromInt(cx) + FInt.Half;
@@ -193,6 +248,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 ref var t = ref Grid[i];
                 h = Fnv(h, (uint)t.Type);
                 h = Fnv(h, (uint)t.CooldownFrames);
+                h = Fnv(h, (uint)t.Level);
             }
 
             for (int i = 0; i < MaxEnemies; i++)

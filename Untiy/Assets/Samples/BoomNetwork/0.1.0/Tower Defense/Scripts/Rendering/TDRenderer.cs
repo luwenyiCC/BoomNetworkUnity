@@ -18,12 +18,15 @@ namespace BoomNetwork.Samples.TowerDefense
 
         // ==================== Materials ====================
         Material _matGround, _matGridEven, _matGridOdd, _matBase, _matBaseBeacon;
-        Material _matArrow, _matArrowTop;
-        Material _matCannon, _matCannonBall;
-        Material _matMagic, _matMagicOrb;
+        // Tower materials: [type index 1-3][level 1-3] — pre-tinted per level
+        Material[,] _matTowerBase = new Material[4, 4]; // [TowerType, level]
+        Material[,] _matTowerDeco = new Material[4, 4];
         Material _matBasic, _matFast, _matTank, _matSlowed;
         Material _matFxArrow, _matFxBall, _matFxExplosion, _matFxMagic;
-        Material _matRangeRing; // hover 攻击范围圆
+        // ==================== Cell highlight ====================
+        GameObject _cellHighlight;
+        Renderer   _cellHighlightRend;
+        Material   _matCellHighlight;
 
         // ==================== Tower pool ====================
         // 每格：底座 + 顶部装饰（各有自己的 Renderer）
@@ -92,6 +95,7 @@ namespace BoomNetwork.Samples.TowerDefense
             CreateArrowFxPool();
             CreateCannonFxPool();
             CreateMagicFxPool();
+            CreateCellHighlight();
 
             for (int i = 0; i < GameState.GridSize; i++) _prevCooldown[i] = 0;
             for (int i = 0; i < GameState.MaxEnemies; i++) _prevEnemyHp[i] = 0;
@@ -149,7 +153,10 @@ namespace BoomNetwork.Samples.TowerDefense
                 float punch = Mathf.Sin(_towerPunchTimer[i] * Mathf.PI);
                 float s = 1f + punch * 0.25f;
                 if (_towerBase[i].activeSelf)
-                    _towerBase[i].transform.localScale = GetTowerBaseScale(_state.Grid[i].Type) * s;
+                {
+                    ref var gt = ref _state.Grid[i];
+                    _towerBase[i].transform.localScale = GetTowerBaseScale(gt.Type, gt.Level) * s;
+                }
             }
         }
 
@@ -165,43 +172,36 @@ namespace BoomNetwork.Samples.TowerDefense
                 _towerDeco[i].SetActive(show);
                 if (!show) continue;
 
-                switch (t.Type)
-                {
-                    case TowerType.Arrow:
-                        _towerBaseRend[i].sharedMaterial = _matArrow;
-                        _towerDecoRend[i].sharedMaterial = _matArrowTop;
-                        break;
-                    case TowerType.Cannon:
-                        _towerBaseRend[i].sharedMaterial = _matCannon;
-                        _towerDecoRend[i].sharedMaterial = _matCannonBall;
-                        break;
-                    case TowerType.Magic:
-                        _towerBaseRend[i].sharedMaterial = _matMagic;
-                        _towerDecoRend[i].sharedMaterial = _matMagicOrb;
-                        break;
-                }
+                // Scale by level (punch animation may override momentarily)
+                if (_towerPunchTimer[i] <= 0f)
+                    _towerBase[i].transform.localScale = GetTowerBaseScale(t.Type, t.Level);
+
+                int lv = Mathf.Clamp(t.Level, 1, 3);
+                _towerBaseRend[i].sharedMaterial = _matTowerBase[(int)t.Type, lv];
+                _towerDecoRend[i].sharedMaterial = _matTowerDeco[(int)t.Type, lv];
 
                 // 开火检测
-                int maxCd = GameState.GetTowerCooldown(t.Type);
+                int maxCd = GameState.GetTowerCooldown(t.Type, t.Level);
                 if (t.CooldownFrames == maxCd && _prevCooldown[i] < maxCd)
                 {
                     _towerPunchTimer[i] = 1f; // 触发后坐动画
                     int cx = i % GameState.GridW;
                     int cy = i / GameState.GridW;
                     Vector3 origin = new Vector3(cx + 0.5f, 1.0f, cy + 0.5f);
-                    Vector3 target = FindNearestEnemyPos(origin, GameState.GetTowerRange(t.Type).ToFloat());
+                    Vector3 target = FindNearestEnemyPos(origin, GameState.GetTowerRange(t.Type, t.Level).ToFloat());
                     SpawnFx(t.Type, origin, target);
                 }
             }
         }
 
-        Vector3 GetTowerBaseScale(TowerType type)
+        Vector3 GetTowerBaseScale(TowerType type, int level = 1)
         {
+            float s = 1f + (level - 1) * 0.22f; // L2: ×1.22, L3: ×1.44
             switch (type)
             {
-                case TowerType.Arrow:  return new Vector3(0.32f, 1.3f, 0.32f); // 细高圆柱
-                case TowerType.Cannon: return new Vector3(0.75f, 0.45f, 0.75f); // 宽矮圆柱
-                default:               return new Vector3(0.38f, 0.95f, 0.38f); // 魔法中等
+                case TowerType.Arrow:  return new Vector3(0.32f * s, 1.3f  * s, 0.32f * s);
+                case TowerType.Cannon: return new Vector3(0.75f * s, 0.45f * s, 0.75f * s);
+                default:               return new Vector3(0.38f * s, 0.95f * s, 0.38f * s);
             }
         }
 
@@ -427,6 +427,26 @@ namespace BoomNetwork.Samples.TowerDefense
             return true;
         }
 
+        public void SetCellHighlight(int gx, int gy)
+        {
+            if (_cellHighlight == null) return;
+            if (gx < 0 || !GameState.IsInBounds(gx, gy))
+            {
+                _cellHighlight.SetActive(false);
+                return;
+            }
+            _cellHighlight.transform.position = new Vector3(gx + 0.5f, 0.03f, gy + 0.5f);
+            _cellHighlight.SetActive(true);
+        }
+
+        public Vector2 GetCellScreenCenter(int gx, int gy)
+        {
+            if (_cam == null) return new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            Vector3 world  = new Vector3(gx + 0.5f, 0f, gy + 0.5f);
+            Vector3 screen = _cam.WorldToScreenPoint(world);
+            return new Vector2(screen.x, screen.y);
+        }
+
         // ==================== Object Creation ====================
 
         void CreateMaterials()
@@ -444,13 +464,26 @@ namespace BoomNetwork.Samples.TowerDefense
             _matBase       = new Material(sh) { color = new Color(0.80f, 0.60f, 0.10f) };
             _matBaseBeacon = new Material(sh) { color = new Color(1.00f, 0.85f, 0.20f) };
 
-            // 塔
-            _matArrow    = new Material(sh) { color = new Color(0.15f, 0.75f, 0.30f) }; // 绿
-            _matArrowTop = new Material(sh) { color = new Color(0.80f, 1.00f, 0.60f) }; // 亮绿尖顶
-            _matCannon   = new Material(sh) { color = new Color(0.75f, 0.35f, 0.05f) }; // 深橙
-            _matCannonBall = new Material(sh) { color = new Color(0.25f, 0.25f, 0.30f) }; // 炮管灰
-            _matMagic    = new Material(sh) { color = new Color(0.45f, 0.15f, 0.85f) }; // 深紫
-            _matMagicOrb = new Material(sh) { color = new Color(0.85f, 0.55f, 1.00f) }; // 亮紫水晶
+            // 塔：预生成 3 个等级的颜色（每级亮 25%）
+            Color[] baseColors = { Color.clear,
+                new Color(0.15f, 0.75f, 0.30f),  // Arrow base
+                new Color(0.75f, 0.35f, 0.05f),  // Cannon base
+                new Color(0.45f, 0.15f, 0.85f),  // Magic base
+            };
+            Color[] decoColors = { Color.clear,
+                new Color(0.80f, 1.00f, 0.60f),  // Arrow deco
+                new Color(0.25f, 0.25f, 0.30f),  // Cannon deco
+                new Color(0.85f, 0.55f, 1.00f),  // Magic deco
+            };
+            for (int ti = 1; ti <= 3; ti++)
+            {
+                for (int lv = 1; lv <= 3; lv++)
+                {
+                    float t = 1f + (lv - 1) * 0.25f;
+                    _matTowerBase[ti, lv] = new Material(sh) { color = baseColors[ti] * t };
+                    _matTowerDeco[ti, lv] = new Material(sh) { color = decoColors[ti] * t };
+                }
+            }
 
             // 敌人
             _matBasic  = new Material(sh) { color = new Color(0.90f, 0.15f, 0.15f) }; // 红
@@ -552,7 +585,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 tBase.transform.position   = new Vector3(wx, 0.4f, wz);
                 tBase.transform.localScale = new Vector3(0.35f, 0.5f, 0.35f);
                 _towerBaseRend[i] = tBase.GetComponent<Renderer>();
-                _towerBaseRend[i].sharedMaterial = _matArrow;
+                _towerBaseRend[i].sharedMaterial = _matTowerBase[1, 1];
                 DestroyCollider(tBase);
                 tBase.SetActive(false);
                 _towerBase[i] = tBase;
@@ -564,7 +597,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 tDeco.transform.position   = new Vector3(wx, 1.1f, wz);
                 tDeco.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
                 _towerDecoRend[i] = tDeco.GetComponent<Renderer>();
-                _towerDecoRend[i].sharedMaterial = _matArrowTop;
+                _towerDecoRend[i].sharedMaterial = _matTowerDeco[1, 1];
                 DestroyCollider(tDeco);
                 tDeco.SetActive(false);
                 _towerDeco[i] = tDeco;
@@ -638,6 +671,27 @@ namespace BoomNetwork.Samples.TowerDefense
             }
         }
 
+        void CreateCellHighlight()
+        {
+            _cellHighlight = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            _cellHighlight.name = "TD_CellHighlight";
+            _cellHighlight.transform.SetParent(transform);
+            _cellHighlight.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            _cellHighlight.transform.localScale = new Vector3(0.95f, 0.95f, 1f);
+            _matCellHighlight = new Material(
+                Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Standard"))
+            {
+                color = new Color(1f, 0.92f, 0.2f, 0.55f)
+            };
+            // Enable transparency
+            _matCellHighlight.SetFloat("_Surface", 1f);
+            _matCellHighlight.renderQueue = 3000;
+            _cellHighlightRend = _cellHighlight.GetComponent<Renderer>();
+            _cellHighlightRend.material = _matCellHighlight;
+            DestroyCollider(_cellHighlight);
+            _cellHighlight.SetActive(false);
+        }
+
         static void DestroyCollider(GameObject obj)
         {
             var col = obj.GetComponent<Collider>();
@@ -648,11 +702,15 @@ namespace BoomNetwork.Samples.TowerDefense
         {
             Destroy(_matGround); Destroy(_matGridEven); Destroy(_matGridOdd);
             Destroy(_matBase); Destroy(_matBaseBeacon);
-            Destroy(_matArrow); Destroy(_matArrowTop);
-            Destroy(_matCannon); Destroy(_matCannonBall);
-            Destroy(_matMagic); Destroy(_matMagicOrb);
             Destroy(_matBasic); Destroy(_matFast); Destroy(_matTank); Destroy(_matSlowed);
             Destroy(_matFxArrow); Destroy(_matFxBall); Destroy(_matFxExplosion); Destroy(_matFxMagic);
+            Destroy(_matCellHighlight);
+            for (int ti = 1; ti <= 3; ti++)
+                for (int lv = 1; lv <= 3; lv++)
+                {
+                    Destroy(_matTowerBase[ti, lv]);
+                    Destroy(_matTowerDeco[ti, lv]);
+                }
         }
     }
 }

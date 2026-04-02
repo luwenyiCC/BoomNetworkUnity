@@ -10,7 +10,8 @@ namespace BoomNetwork.Samples.TowerDefense
     public static class TDInput
     {
         public const int InputSize = 4;
-        public const byte SellAction = 4;
+        public const byte SellAction    = 4;
+        public const byte UpgradeAction = 5;
 
         public static void Encode(byte[] buf, int gridX, int gridY, byte towerTypeByte)
         {

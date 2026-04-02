@@ -119,17 +119,38 @@ namespace BoomNetwork.Samples.TowerDefense
                 // TowerType == 0 (None) means Silent When Idle — skip
                 if (towerType == TowerType.None) continue;
 
-                // Sell action (TowerType == 4 in wire protocol)
+                // Sell action
                 if ((byte)towerType == TDInput.SellAction)
                 {
                     if (GameState.IsInBounds(gx, gy))
                     {
                         int idx = GameState.CellIndex(gx, gy);
-                        if (State.Grid[idx].Type != TowerType.None)
+                        ref var existing = ref State.Grid[idx];
+                        if (existing.Type != TowerType.None)
                         {
-                            State.Gold += GameState.SellRefund;
+                            State.Gold += GameState.GetSellRefund(existing.Type, existing.Level);
                             State.Grid[idx] = default;
                             flowDirty = true;
+                        }
+                    }
+                    continue;
+                }
+
+                // Upgrade action
+                if ((byte)towerType == TDInput.UpgradeAction)
+                {
+                    if (GameState.IsInBounds(gx, gy))
+                    {
+                        int idx = GameState.CellIndex(gx, gy);
+                        ref var t = ref State.Grid[idx];
+                        if (t.Type != TowerType.None && t.Level < GameState.MaxTowerLevel)
+                        {
+                            int upgradeCost = GameState.GetTowerUpgradeCost(t.Type, t.Level);
+                            if (State.Gold >= upgradeCost)
+                            {
+                                State.Gold -= upgradeCost;
+                                t.Level++;
+                            }
                         }
                     }
                     continue;
@@ -146,6 +167,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 {
                     Type           = towerType,
                     CooldownFrames = 0,
+                    Level          = 1,
                 };
                 flowDirty = true;
             }

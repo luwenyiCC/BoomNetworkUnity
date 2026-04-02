@@ -37,6 +37,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 ref var t = ref state.Grid[i];
                 w.Write((byte)t.Type);
                 w.Write(t.CooldownFrames);
+                w.Write((byte)t.Level);
             }
 
             // Enemies: write slot index for determinism
@@ -100,6 +101,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 {
                     Type           = (TowerType)r.ReadByte(),
                     CooldownFrames = r.ReadInt32(),
+                    Level          = r.ReadByte(),
                 };
             }
 

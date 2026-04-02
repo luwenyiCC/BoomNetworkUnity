@@ -6,12 +6,13 @@
 //   No direct GameState mutation outside frame processing.
 //
 // SILENT WHEN IDLE (Red Line #5):
-//   Input is only sent when the player clicks a cell to place/sell a tower.
+//   Input is only sent when the player clicks a cell to place/upgrade/sell a tower.
 //   Idle frames send nothing. Tower placement is immediate (Red Line #4).
 //
-// BANDWIDTH CARVE-OUT:
-//   100 or 200 enemies on screen = zero extra bandwidth. Only tower
-//   placement commands traverse the wire. Capture this in OnGUI.
+// INTERACTION MODEL:
+//   Click any grid cell → context menu appears (floating above the cell).
+//   Empty cell: choose tower type to build.
+//   Occupied cell: upgrade (if level < 3) or sell.
 
 using UnityEngine;
 using BoomNetwork.Client.FrameSync;
@@ -34,23 +35,17 @@ namespace BoomNetwork.Samples.TowerDefense
         uint _desyncFrame;
         bool _gameOver;
 
-        // Tower placement UI state
-        TowerType _selectedTower = TowerType.Arrow;
-        bool _sellMode;
+        // Cell selection state
+        int _selectedGx = -1, _selectedGy = -1;
+        Rect _menuRect; // IMGUI coords (y from top), used to ignore menu clicks in Update
 
         // Cached GUIStyles
         bool _stylesCached;
-        GUIStyle _boxStyle, _titleStyle, _labelStyle, _btnStyle, _smallStyle, _btnSelectedStyle;
+        GUIStyle _boxStyle, _titleStyle, _labelStyle, _btnStyle, _smallStyle, _btnSelectedStyle, _btnDimStyle;
 
         static readonly string[] TowerNames  = { "", "弓箭塔", "炮台", "魔法塔" };
-        static readonly string[] TowerIcons  = { "", "\u2191", "\uD83D\uDCA3", "\u2605" };
-        static readonly Color[]  TowerColors =
-        {
-            Color.white,
-            new Color(0.7f, 1f, 0.7f),
-            new Color(1f, 0.7f, 0.4f),
-            new Color(0.6f, 0.6f, 1f),
-        };
+        static readonly string[] TowerIcons  = { "", "↑", "●", "★" };
+        static readonly int[]    TowerCosts  = { 0, GameState.ArrowCost, GameState.CannonCost, GameState.MagicCost };
 
         void Start()
         {
@@ -75,28 +70,63 @@ namespace BoomNetwork.Samples.TowerDefense
         {
             if (!_syncing || _renderer == null) return;
 
-            // Keyboard shortcut: 1/2/3 = tower type, S = sell mode
-            if (Input.GetKeyDown(KeyCode.Alpha1)) { _selectedTower = TowerType.Arrow;  _sellMode = false; }
-            if (Input.GetKeyDown(KeyCode.Alpha2)) { _selectedTower = TowerType.Cannon; _sellMode = false; }
-            if (Input.GetKeyDown(KeyCode.Alpha3)) { _selectedTower = TowerType.Magic;  _sellMode = false; }
-            if (Input.GetKeyDown(KeyCode.S))        _sellMode = !_sellMode;
-
-            // Mouse click → send input
             if (Input.GetMouseButtonDown(0))
             {
+                // Ignore if clicking inside the context menu
+                if (IsMouseOverMenu(Input.mousePosition)) return;
+
                 if (_renderer.TryGetGridCell(Input.mousePosition, out int gx, out int gy))
-                    SendAction(gx, gy);
+                {
+                    // Toggle selection: click same cell again to deselect
+                    if (_selectedGx == gx && _selectedGy == gy)
+                        ClearSelection();
+                    else
+                    {
+                        _selectedGx = gx;
+                        _selectedGy = gy;
+                        if (_renderer != null) _renderer.SetCellHighlight(gx, gy);
+                    }
+                }
+                else
+                {
+                    ClearSelection();
+                }
             }
         }
 
-        void SendAction(int gx, int gy)
+        void ClearSelection()
         {
-            byte towerByte = _sellMode
-                ? TDInput.SellAction
-                : (byte)_selectedTower;
+            _selectedGx = _selectedGy = -1;
+            if (_renderer != null) _renderer.SetCellHighlight(-1, -1);
+        }
 
-            TDInput.Encode(_inputBuf, gx, gy, towerByte);
+        bool IsMouseOverMenu(Vector2 screenPos)
+        {
+            if (_selectedGx < 0) return false;
+            // Convert Input.mousePosition (y from bottom) to IMGUI coords (y from top)
+            float guiY = Screen.height - screenPos.y;
+            return _menuRect.Contains(new Vector2(screenPos.x, guiY));
+        }
+
+        void SendBuild(int gx, int gy, TowerType tt)
+        {
+            TDInput.Encode(_inputBuf, gx, gy, (byte)tt);
             _network.SendInput(_inputBuf);
+            ClearSelection();
+        }
+
+        void SendUpgrade(int gx, int gy)
+        {
+            TDInput.Encode(_inputBuf, gx, gy, TDInput.UpgradeAction);
+            _network.SendInput(_inputBuf);
+            ClearSelection();
+        }
+
+        void SendSell(int gx, int gy)
+        {
+            TDInput.Encode(_inputBuf, gx, gy, TDInput.SellAction);
+            _network.SendInput(_inputBuf);
+            ClearSelection();
         }
 
         // ==================== Network Events ====================
@@ -126,7 +156,7 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void OnPlayerJoined(int pid)
         {
-            _sim.PidToSlot(pid); // register mapping deterministically
+            _sim.PidToSlot(pid);
             Debug.Log($"[TD] Player {pid} joined");
         }
 
@@ -145,7 +175,6 @@ namespace BoomNetwork.Samples.TowerDefense
             uint hash = _sim.State.ComputeHash();
             _network.Client.SendFrameHash(frame.FrameNumber, hash);
 
-            // 游戏结束：暂停帧同步，停止服务器继续推帧
             if (_sim.IsGameOver() && !_gameOver)
             {
                 _gameOver = true;
@@ -181,7 +210,7 @@ namespace BoomNetwork.Samples.TowerDefense
             if (!_syncing) return;
             CacheStyles();
             DrawStatusHUD();
-            DrawTowerPalette();
+            if (_selectedGx >= 0) DrawCellMenu();
             DrawDesyncOverlay();
             DrawGameOverOverlay();
         }
@@ -192,7 +221,7 @@ namespace BoomNetwork.Samples.TowerDefense
             _stylesCached = true;
 
             _boxStyle = new GUIStyle(GUI.skin.box)
-                { normal = { background = MakeTex(1, 1, new Color(0, 0, 0, 0.75f)) } };
+                { normal = { background = MakeTex(1, 1, new Color(0, 0, 0, 0.82f)) } };
             _titleStyle = new GUIStyle(GUI.skin.label)
                 { fontStyle = FontStyle.Bold, fontSize = 14, normal = { textColor = Color.white }, richText = true };
             _labelStyle = new GUIStyle(GUI.skin.label)
@@ -203,6 +232,8 @@ namespace BoomNetwork.Samples.TowerDefense
                 { fontSize = 10, normal = { textColor = new Color(0.6f, 0.6f, 0.6f) }, richText = true };
             _btnSelectedStyle = new GUIStyle(_btnStyle)
                 { normal = { textColor = Color.yellow, background = MakeTex(1, 1, new Color(0.3f, 0.3f, 0f, 0.9f)) } };
+            _btnDimStyle = new GUIStyle(_btnStyle)
+                { normal = { textColor = new Color(0.5f, 0.5f, 0.5f) } };
         }
 
         void DrawStatusHUD()
@@ -232,45 +263,98 @@ namespace BoomNetwork.Samples.TowerDefense
                 $"屏幕上 {alive} 只敌人，帧包大小不变（纯帧同步）", _smallStyle);
         }
 
-        void DrawTowerPalette()
+        void DrawCellMenu()
         {
-            float px = 10, py = Screen.height - 130, w = 340, h = 120;
-            GUI.Box(new Rect(px, py, w, h), "", _boxStyle);
-            py += 8;
+            int gx = _selectedGx, gy = _selectedGy;
+            if (!GameState.IsInBounds(gx, gy)) return;
 
-            GUI.Label(new Rect(px + 5, py, w, 18), "建造  [1] 弓箭塔  [2] 炮台  [3] 魔法塔  [S] 出售", _labelStyle);
-            py += 22;
+            ref var tower = ref _sim.State.Grid[GameState.CellIndex(gx, gy)];
+            bool hasTower = tower.Type != TowerType.None;
+            int gold = _sim.State.Gold;
 
-            // Tower buttons
-            float bw = 80, bh = 34, bx = px + 5;
-            for (int i = 1; i <= 3; i++)
+            // Get screen position of cell center for menu anchor
+            Vector2 cellScreen = _renderer != null
+                ? _renderer.GetCellScreenCenter(gx, gy)
+                : new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+
+            // Convert from Unity screen (y=0 bottom) to IMGUI (y=0 top)
+            float guiX = cellScreen.x;
+            float guiY = Screen.height - cellScreen.y;
+
+            const float MenuW = 220f;
+            float menuH = hasTower ? 140f : 160f;
+            float px = Mathf.Clamp(guiX - MenuW * 0.5f, 5f, Screen.width  - MenuW - 5f);
+            float py = Mathf.Clamp(guiY - menuH - 20f,  5f, Screen.height - menuH - 5f);
+
+            _menuRect = new Rect(px, py, MenuW, menuH);
+            GUI.Box(_menuRect, "", _boxStyle);
+
+            float iy = py + 6;
+
+            if (!hasTower)
             {
-                var tt    = (TowerType)i;
-                bool sel  = !_sellMode && _selectedTower == tt;
-                int cost  = GameState.GetTowerCost(tt);
-                bool affordable = _sim.State.Gold >= cost;
-                string label = $"{TowerIcons[i]} {TowerNames[i]}\n<size=10>{cost}金</size>";
+                // ─── 建造菜单 ─────────────────────────────────
+                GUI.Label(new Rect(px + 6, iy, MenuW - 12, 18), "<b>建造塔</b>", _titleStyle);
+                iy += 22;
 
-                GUI.color = affordable ? Color.white : new Color(0.5f, 0.5f, 0.5f);
-                if (GUI.Button(new Rect(bx, py, bw, bh), label, sel ? _btnSelectedStyle : _btnStyle))
+                for (int ti = 1; ti <= 3; ti++)
                 {
-                    _selectedTower = tt;
-                    _sellMode = false;
+                    var tt = (TowerType)ti;
+                    int cost = TowerCosts[ti];
+                    bool canAfford = gold >= cost;
+                    string label = $"{TowerIcons[ti]} {TowerNames[ti]}  <size=11>{cost}金</size>";
+                    if (GUI.Button(new Rect(px + 6, iy, MenuW - 12, 30), label,
+                            canAfford ? _btnStyle : _btnDimStyle))
+                    {
+                        if (canAfford) SendBuild(gx, gy, tt);
+                    }
+                    iy += 34;
                 }
-                GUI.color = Color.white;
-                bx += bw + 4;
+
+                if (GUI.Button(new Rect(px + 6, iy, MenuW - 12, 22), "取消", _btnStyle))
+                    ClearSelection();
             }
+            else
+            {
+                // ─── 已有塔菜单 ────────────────────────────────
+                int lvl = tower.Level;
+                string lvlStr = lvl >= GameState.MaxTowerLevel
+                    ? "<color=#ffdd44>★ 满级</color>"
+                    : $"Lv <b>{lvl}</b>";
+                GUI.Label(new Rect(px + 6, iy, MenuW - 12, 18),
+                    $"<b>{TowerNames[(int)tower.Type]}</b>  {lvlStr}", _titleStyle);
+                iy += 22;
 
-            // Sell button
-            if (GUI.Button(new Rect(bx, py, bw, bh), $"\u2715 出售\n<size=10>+{GameState.SellRefund}金</size>",
-                _sellMode ? _btnSelectedStyle : _btnStyle))
-                _sellMode = !_sellMode;
+                // Upgrade button
+                if (lvl < GameState.MaxTowerLevel)
+                {
+                    int upgCost = GameState.GetTowerUpgradeCost(tower.Type, lvl);
+                    bool canUpg = gold >= upgCost;
+                    string upgLabel = $"↑ 升级到 Lv{lvl + 1}  <size=11>{upgCost}金</size>";
+                    if (GUI.Button(new Rect(px + 6, iy, MenuW - 12, 34), upgLabel,
+                            canUpg ? _btnSelectedStyle : _btnDimStyle))
+                    {
+                        if (canUpg) SendUpgrade(gx, gy);
+                    }
+                    iy += 38;
+                }
+                else
+                {
+                    GUI.Label(new Rect(px + 6, iy, MenuW - 12, 34),
+                        "<color=#888888>已达最高等级</color>", _labelStyle);
+                    iy += 38;
+                }
 
-            py += 40;
-            string modeStr = _sellMode
-                ? "<color=red>出售模式：点击塔格将其出售</color>"
-                : $"建造：<color=yellow>{TowerNames[(int)_selectedTower]}</color> — 点击地图放置";
-            GUI.Label(new Rect(px + 5, py, w, 18), modeStr, _labelStyle);
+                // Sell button
+                int refund = GameState.GetSellRefund(tower.Type, lvl);
+                if (GUI.Button(new Rect(px + 6, iy, MenuW - 12, 30),
+                        $"✕ 出售  <size=11>+{refund}金</size>", _btnStyle))
+                    SendSell(gx, gy);
+                iy += 34;
+
+                if (GUI.Button(new Rect(px + 6, iy, MenuW - 12, 22), "取消", _btnStyle))
+                    ClearSelection();
+            }
         }
 
         void DrawDesyncOverlay()

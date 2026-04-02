@@ -27,33 +27,35 @@ namespace BoomNetwork.Samples.TowerDefense
                         continue;
                     }
 
-                    FInt towerX = GameState.CellCenterX(cx);
-                    FInt towerZ = GameState.CellCenterZ(cy);
-                    FInt range  = GameState.GetTowerRange(tower.Type);
+                    FInt towerX  = GameState.CellCenterX(cx);
+                    FInt towerZ  = GameState.CellCenterZ(cy);
+                    FInt range   = GameState.GetTowerRange(tower.Type, tower.Level);
                     FInt rangeSq = range * range;
 
                     int target = FindNearest(state, towerX, towerZ, rangeSq);
                     if (target < 0) continue;
 
+                    int lvl = tower.Level;
+
                     // Fire
                     switch (tower.Type)
                     {
                         case TowerType.Arrow:
-                            DamageEnemy(state, target, GameState.ArrowDamage);
+                            DamageEnemy(state, target, GameState.GetTowerDamage(TowerType.Arrow, lvl));
                             break;
 
                         case TowerType.Cannon:
-                            FireCannon(state, target, towerX, towerZ);
+                            FireCannon(state, target, lvl);
                             break;
 
                         case TowerType.Magic:
-                            DamageEnemy(state, target, GameState.MagicDamage);
+                            DamageEnemy(state, target, GameState.GetTowerDamage(TowerType.Magic, lvl));
                             if (state.Enemies[target].IsAlive)
-                                state.Enemies[target].SlowFrames = GameState.MagicSlowFrames;
+                                state.Enemies[target].SlowFrames = GameState.GetMagicSlowFrames(lvl);
                             break;
                     }
 
-                    tower.CooldownFrames = GameState.GetTowerCooldown(tower.Type);
+                    tower.CooldownFrames = GameState.GetTowerCooldown(tower.Type, tower.Level);
                 }
             }
         }
@@ -76,13 +78,14 @@ namespace BoomNetwork.Samples.TowerDefense
             return best;
         }
 
-        static void FireCannon(GameState state, int primaryTarget, FInt towerX, FInt towerZ)
+        static void FireCannon(GameState state, int primaryTarget, int level)
         {
-            // Use primary target's position as AoE center
             ref var primary = ref state.Enemies[primaryTarget];
-            FInt hitX = primary.PosX;
-            FInt hitZ = primary.PosZ;
-            FInt blastSq = GameState.CannonAoeRadius * GameState.CannonAoeRadius;
+            FInt hitX    = primary.PosX;
+            FInt hitZ    = primary.PosZ;
+            FInt blast   = GameState.GetCannonAoeRadius(level);
+            FInt blastSq = blast * blast;
+            int  dmg     = GameState.GetTowerDamage(TowerType.Cannon, level);
 
             for (int i = 0; i < GameState.MaxEnemies; i++)
             {
@@ -90,7 +93,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 if (!e.IsAlive) continue;
                 FInt dSq = FInt.DistanceSqr(hitX, hitZ, e.PosX, e.PosZ);
                 if (dSq <= blastSq)
-                    DamageEnemy(state, i, GameState.CannonDamage);
+                    DamageEnemy(state, i, dmg);
             }
         }
 

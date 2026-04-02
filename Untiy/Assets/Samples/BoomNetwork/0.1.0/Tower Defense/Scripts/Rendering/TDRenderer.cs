@@ -1,13 +1,10 @@
-// BoomNetwork TowerDefense Demo — Renderer
+// BoomNetwork TowerDefense Demo — Renderer (Visual Upgrade)
 //
-// Top-down orthographic view. Color-coded Quads and Cubes, no external art assets.
-//
-// 攻击特效（纯视觉层，不影响模拟状态）：
-//   弓箭塔 — 黄色细长 Cube 从塔飞向目标，8 帧
-//   炮台   — 两阶段：橙色 Sphere 炮弹飞行（前 10 帧）+ 橙红爆炸球膨胀（后 8 帧），共 18 帧
-//   魔法塔 — 紫色 Sphere 在目标处 sin 脉冲，10 帧
-//
-// 三个独立 FX 池，避免几何体混用。
+// 摄像机：70° 斜视角，正交，可见塔高和 3D 感
+// 塔外形：弓箭塔=细高圆柱 / 炮台=宽矮圆柱+球 / 魔法塔=胶囊+顶球
+// 敌人：Basic=方块 / Fast=旋转45°菱形 / Tank=宽圆柱；HP 越低越缩小
+// 基地：金色光标脉动
+// 攻击特效：独立三池（Arrow/Cannon/Magic）
 
 using UnityEngine;
 
@@ -20,64 +17,62 @@ namespace BoomNetwork.Samples.TowerDefense
         Camera _cam;
 
         // ==================== Materials ====================
-        Material _matGround, _matGridLine, _matBase;
-        Material _matArrow, _matCannon, _matMagic;
-        Material _matBasic, _matFast, _matTank, _matBasicSlow;
+        Material _matGround, _matGridEven, _matGridOdd, _matBase, _matBaseBeacon;
+        Material _matArrow, _matArrowTop;
+        Material _matCannon, _matCannonBall;
+        Material _matMagic, _matMagicOrb;
+        Material _matBasic, _matFast, _matTank, _matSlowed;
         Material _matFxArrow, _matFxBall, _matFxExplosion, _matFxMagic;
+        Material _matRangeRing; // hover 攻击范围圆
 
-        // ==================== Tower / Enemy pools ====================
-        GameObject[] _towerObjs = new GameObject[GameState.GridSize];
-        Renderer[]   _towerRend = new Renderer[GameState.GridSize];
+        // ==================== Tower pool ====================
+        // 每格：底座 + 顶部装饰（各有自己的 Renderer）
+        GameObject[] _towerBase = new GameObject[GameState.GridSize];
+        GameObject[] _towerDeco = new GameObject[GameState.GridSize]; // 炮球/魔法顶球/箭头
+        Renderer[]   _towerBaseRend = new Renderer[GameState.GridSize];
+        Renderer[]   _towerDecoRend = new Renderer[GameState.GridSize];
+
+        // 塔攻击"后坐"缩放（纯视觉）
+        float[] _towerPunchTimer = new float[GameState.GridSize];
+        int[]   _prevCooldown    = new int[GameState.GridSize];
+
+        // ==================== Enemy pool ====================
         GameObject[] _enemyObjs = new GameObject[GameState.MaxEnemies];
         Renderer[]   _enemyRend = new Renderer[GameState.MaxEnemies];
+        int[]        _prevEnemyHp = new int[GameState.MaxEnemies]; // HP 变化检测
 
-        // ==================== 弓箭塔 FX（Cube） ====================
+        // ==================== Base beacon ====================
+        GameObject _baseBeacon;
+        Renderer   _baseBeaconRend;
+
+        // ==================== Arrow FX ====================
         const int ArrowFxPool = 24;
+        struct ArrowFx { public bool Active; public Vector3 Origin, Target; public int FramesLeft; public GameObject Obj; }
+        ArrowFx[] _arrowFx = new ArrowFx[ArrowFxPool];
 
-        struct ArrowEffect
-        {
-            public bool      Active;
-            public Vector3   Origin, Target;
-            public int       FramesLeft;
-            public GameObject Obj;
-        }
-
-        ArrowEffect[] _arrowFx = new ArrowEffect[ArrowFxPool];
-
-        // ==================== 炮台 FX（Sphere ×2） ====================
-        // 飞行弹 + 爆炸球各自独立生命周期
+        // ==================== Cannon FX ====================
         const int CannonFxPool = 12;
-
-        struct CannonBall
+        const int CannonTravelFrames    = 15;
+        const int CannonExplosionFrames = 10;
+        struct CannonFx
         {
-            public bool      Active;
-            public Vector3   Origin, Target;
-            public int       FramesTotal, FramesLeft;
-            public GameObject Ball;       // 飞行炮弹 Sphere
-            public GameObject Explosion;  // 爆炸球 Sphere
-            public bool      Exploded;    // 是否已进入爆炸阶段
+            public bool Active, Exploded;
+            public Vector3 Origin, Target;
+            public int FramesTotal, FramesLeft;
+            public GameObject Ball, Explosion;
         }
+        CannonFx[] _cannonFx = new CannonFx[CannonFxPool];
 
-        CannonBall[] _cannonFx = new CannonBall[CannonFxPool];
-
-        // ==================== 魔法塔 FX（Sphere） ====================
+        // ==================== Magic FX ====================
         const int MagicFxPool = 16;
-
-        struct MagicEffect
-        {
-            public bool      Active;
-            public Vector3   Target;
-            public int       FramesTotal, FramesLeft;
-            public GameObject Obj;
-        }
-
-        MagicEffect[] _magicFx = new MagicEffect[MagicFxPool];
-
-        // ==================== Shadow copy ====================
-        int[] _prevCooldown = new int[GameState.GridSize];
+        struct MagicFx { public bool Active; public Vector3 Target; public int FramesTotal, FramesLeft; public GameObject Obj; }
+        MagicFx[] _magicFx = new MagicFx[MagicFxPool];
 
         // ==================== Camera ====================
-        const float CamHeight = 24f;
+        // 70° 仰角斜视，能看到塔高度
+        const float CamTiltX   = 70f;
+        const float CamHeight  = 26f;
+        const float CamOrtho   = 13f;
         static readonly Vector3 MapCenter = new Vector3(GameState.GridW * 0.5f, 0f, GameState.GridH * 0.5f);
 
         // ==================== Init ====================
@@ -91,7 +86,6 @@ namespace BoomNetwork.Samples.TowerDefense
             CreateMaterials();
             CreateCamera();
             CreateGround();
-            CreateGridLines();
             CreateBase();
             CreateTowerPool();
             CreateEnemyPool();
@@ -100,6 +94,7 @@ namespace BoomNetwork.Samples.TowerDefense
             CreateMagicFxPool();
 
             for (int i = 0; i < GameState.GridSize; i++) _prevCooldown[i] = 0;
+            for (int i = 0; i < GameState.MaxEnemies; i++) _prevEnemyHp[i] = 0;
         }
 
         // ==================== SyncVisuals ====================
@@ -115,6 +110,49 @@ namespace BoomNetwork.Samples.TowerDefense
             CaptureFrameShadow();
         }
 
+        // ==================== Update（纯视觉动画） ====================
+
+        void Update()
+        {
+            if (!_initialized || _state == null) return;
+            AnimateBase();
+            AnimateTowerPunch();
+        }
+
+        void AnimateBase()
+        {
+            if (_baseBeacon == null) return;
+            float hp = _state.BaseHp;
+            // 脉动：基地血量越低，脉动越快
+            float speed = 1.5f + (3 - hp) * 1.2f;
+            float pulse = Mathf.Sin(Time.time * speed) * 0.5f + 0.5f; // 0→1
+            float s = Mathf.Lerp(0.6f, 1.1f, pulse);
+            _baseBeacon.transform.localScale = new Vector3(s, s * 0.3f, s);
+            // 颜色随血量：满血金色 → 半血橙色 → 低血红色
+            Color baseColor = hp >= 3
+                ? Color.Lerp(new Color(0.9f, 0.7f, 0.1f), new Color(1f, 0.9f, 0.3f), pulse)
+                : hp == 2
+                    ? Color.Lerp(new Color(0.9f, 0.4f, 0.1f), new Color(1f, 0.6f, 0.1f), pulse)
+                    : Color.Lerp(new Color(0.8f, 0.1f, 0.1f), new Color(1f, 0.2f, 0.2f), pulse);
+            _baseBeaconRend.material.color = baseColor;
+        }
+
+        void AnimateTowerPunch()
+        {
+            float dt = Time.deltaTime;
+            for (int i = 0; i < GameState.GridSize; i++)
+            {
+                if (_towerPunchTimer[i] <= 0f) continue;
+                _towerPunchTimer[i] -= dt * 12f; // 快速衰减
+                if (_towerPunchTimer[i] < 0f) _towerPunchTimer[i] = 0f;
+                // 后坐：先缩再弹回
+                float punch = Mathf.Sin(_towerPunchTimer[i] * Mathf.PI);
+                float s = 1f + punch * 0.25f;
+                if (_towerBase[i].activeSelf)
+                    _towerBase[i].transform.localScale = GetTowerBaseScale(_state.Grid[i].Type) * s;
+            }
+        }
+
         // ==================== SyncTowers ====================
 
         void SyncTowers()
@@ -123,26 +161,47 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var t = ref _state.Grid[i];
                 bool show = t.Type != TowerType.None;
-                _towerObjs[i].SetActive(show);
+                _towerBase[i].SetActive(show);
+                _towerDeco[i].SetActive(show);
                 if (!show) continue;
 
                 switch (t.Type)
                 {
-                    case TowerType.Arrow:  _towerRend[i].sharedMaterial = _matArrow;  break;
-                    case TowerType.Cannon: _towerRend[i].sharedMaterial = _matCannon; break;
-                    case TowerType.Magic:  _towerRend[i].sharedMaterial = _matMagic;  break;
+                    case TowerType.Arrow:
+                        _towerBaseRend[i].sharedMaterial = _matArrow;
+                        _towerDecoRend[i].sharedMaterial = _matArrowTop;
+                        break;
+                    case TowerType.Cannon:
+                        _towerBaseRend[i].sharedMaterial = _matCannon;
+                        _towerDecoRend[i].sharedMaterial = _matCannonBall;
+                        break;
+                    case TowerType.Magic:
+                        _towerBaseRend[i].sharedMaterial = _matMagic;
+                        _towerDecoRend[i].sharedMaterial = _matMagicOrb;
+                        break;
                 }
 
-                // 开火检测：cooldown 本帧刚跳回最大值
+                // 开火检测
                 int maxCd = GameState.GetTowerCooldown(t.Type);
                 if (t.CooldownFrames == maxCd && _prevCooldown[i] < maxCd)
                 {
+                    _towerPunchTimer[i] = 1f; // 触发后坐动画
                     int cx = i % GameState.GridW;
                     int cy = i / GameState.GridW;
-                    Vector3 origin = new Vector3(cx + 0.5f, 0.8f, cy + 0.5f);
+                    Vector3 origin = new Vector3(cx + 0.5f, 1.0f, cy + 0.5f);
                     Vector3 target = FindNearestEnemyPos(origin, GameState.GetTowerRange(t.Type).ToFloat());
                     SpawnFx(t.Type, origin, target);
                 }
+            }
+        }
+
+        Vector3 GetTowerBaseScale(TowerType type)
+        {
+            switch (type)
+            {
+                case TowerType.Arrow:  return new Vector3(0.32f, 1.3f, 0.32f); // 细高圆柱
+                case TowerType.Cannon: return new Vector3(0.75f, 0.45f, 0.75f); // 宽矮圆柱
+                default:               return new Vector3(0.38f, 0.95f, 0.38f); // 魔法中等
             }
         }
 
@@ -167,16 +226,6 @@ namespace BoomNetwork.Samples.TowerDefense
             return best;
         }
 
-        void SpawnFx(TowerType type, Vector3 origin, Vector3 target)
-        {
-            switch (type)
-            {
-                case TowerType.Arrow:  SpawnArrow(origin, target);  break;
-                case TowerType.Cannon: SpawnCannon(origin, target); break;
-                case TowerType.Magic:  SpawnMagic(target);          break;
-            }
-        }
-
         // ==================== SyncEnemies ====================
 
         void SyncEnemies()
@@ -188,27 +237,49 @@ namespace BoomNetwork.Samples.TowerDefense
                 _enemyObjs[i].SetActive(show);
                 if (!show) continue;
 
-                _enemyObjs[i].transform.position = new Vector3(e.PosX.ToFloat(), 0.3f, e.PosZ.ToFloat());
+                float x = e.PosX.ToFloat(), z = e.PosZ.ToFloat();
+
+                // HP 比例决定尺寸（血越少越小，有濒死感）
+                int maxHp = GameState.GetEnemyHp(e.Type);
+                float hpRatio = Mathf.Clamp01((float)e.Hp / maxHp);
+                float shrink = Mathf.Lerp(0.55f, 1.0f, hpRatio);
+
+                bool slowed = e.SlowFrames > 0;
 
                 switch (e.Type)
                 {
                     case EnemyType.Basic:
-                        _enemyRend[i].sharedMaterial = e.SlowFrames > 0 ? _matBasicSlow : _matBasic;
-                        _enemyObjs[i].transform.localScale = new Vector3(0.5f, 0.6f, 0.5f);
+                        _enemyRend[i].sharedMaterial = slowed ? _matSlowed : _matBasic;
+                        _enemyObjs[i].transform.position   = new Vector3(x, 0.25f * shrink, z);
+                        _enemyObjs[i].transform.localScale  = new Vector3(0.5f * shrink, 0.5f * shrink, 0.5f * shrink);
                         break;
                     case EnemyType.Fast:
-                        _enemyRend[i].sharedMaterial = e.SlowFrames > 0 ? _matBasicSlow : _matFast;
-                        _enemyObjs[i].transform.localScale = new Vector3(0.35f, 0.45f, 0.35f);
+                        _enemyRend[i].sharedMaterial = slowed ? _matSlowed : _matFast;
+                        // 旋转 45° 让它从俯视看是菱形
+                        _enemyObjs[i].transform.rotation    = Quaternion.Euler(0f, 45f, 0f);
+                        _enemyObjs[i].transform.position    = new Vector3(x, 0.2f * shrink, z);
+                        _enemyObjs[i].transform.localScale  = new Vector3(0.45f * shrink, 0.35f * shrink, 0.45f * shrink);
                         break;
                     case EnemyType.Tank:
-                        _enemyRend[i].sharedMaterial = e.SlowFrames > 0 ? _matBasicSlow : _matTank;
-                        _enemyObjs[i].transform.localScale = new Vector3(0.75f, 0.85f, 0.75f);
+                        _enemyRend[i].sharedMaterial = slowed ? _matSlowed : _matTank;
+                        _enemyObjs[i].transform.position   = new Vector3(x, 0.2f * shrink, z);
+                        _enemyObjs[i].transform.localScale  = new Vector3(0.8f * shrink, 0.35f, 0.8f * shrink); // 宽矮
                         break;
                 }
             }
         }
 
-        // ==================== 弓箭塔特效 ====================
+        void SpawnFx(TowerType type, Vector3 origin, Vector3 target)
+        {
+            switch (type)
+            {
+                case TowerType.Arrow:  SpawnArrow(origin, target);  break;
+                case TowerType.Cannon: SpawnCannon(origin, target); break;
+                case TowerType.Magic:  SpawnMagic(target);          break;
+            }
+        }
+
+        // ==================== Arrow FX ====================
 
         void SpawnArrow(Vector3 origin, Vector3 target)
         {
@@ -216,10 +287,7 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _arrowFx[i];
                 if (f.Active) continue;
-                f.Active     = true;
-                f.Origin     = origin;
-                f.Target     = target;
-                f.FramesLeft = 8;
+                f.Active = true; f.Origin = origin; f.Target = target; f.FramesLeft = 8;
                 f.Obj.SetActive(true);
                 return;
             }
@@ -231,33 +299,21 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _arrowFx[i];
                 if (!f.Active) continue;
-
                 f.FramesLeft--;
-                if (f.FramesLeft <= 0)
-                {
-                    f.Active = false;
-                    f.Obj.SetActive(false);
-                    continue;
-                }
+                if (f.FramesLeft <= 0) { f.Active = false; f.Obj.SetActive(false); continue; }
 
-                float t   = 1f - f.FramesLeft / 8f; // 0→1
+                float t   = 1f - f.FramesLeft / 8f;
                 Vector3 pos = Vector3.Lerp(f.Origin, f.Target, t);
                 f.Obj.transform.position = pos;
-
                 Vector3 dir = f.Target - f.Origin;
                 if (dir.sqrMagnitude > 0.001f)
                     f.Obj.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
-
                 float len = Mathf.Max(0.2f, dir.magnitude * 0.4f);
                 f.Obj.transform.localScale = new Vector3(0.1f, 0.1f, len);
             }
         }
 
-        // ==================== 炮台特效 ====================
-        // 两阶段：飞行炮弹（15 帧）→ 爆炸膨胀（10 帧）
-
-        const int CannonTravelFrames    = 15;
-        const int CannonExplosionFrames = 10;
+        // ==================== Cannon FX ====================
 
         void SpawnCannon(Vector3 origin, Vector3 target)
         {
@@ -265,13 +321,9 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _cannonFx[i];
                 if (f.Active) continue;
-                f.Active      = true;
-                f.Origin      = origin;
-                f.Target      = target;
-                f.FramesTotal = CannonTravelFrames;
-                f.FramesLeft  = CannonTravelFrames;
-                f.Exploded    = false;
-                // 炮弹从塔位置出发，初始高度 1.5（弹起感）
+                f.Active = true; f.Exploded = false;
+                f.Origin = origin; f.Target = target;
+                f.FramesTotal = CannonTravelFrames; f.FramesLeft = CannonTravelFrames;
                 f.Ball.transform.position   = new Vector3(origin.x, 1.5f, origin.z);
                 f.Ball.transform.localScale = new Vector3(0.35f, 0.35f, 0.35f);
                 f.Ball.SetActive(true);
@@ -286,35 +338,23 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _cannonFx[i];
                 if (!f.Active) continue;
-
                 f.FramesLeft--;
 
                 if (!f.Exploded)
                 {
-                    // 飞行阶段
-                    // t: 0（刚发射）→ 1（命中）
                     float t = 1f - (float)f.FramesLeft / f.FramesTotal;
-
-                    // XZ：直线飞向目标
                     float px = Mathf.Lerp(f.Origin.x, f.Target.x, t);
                     float pz = Mathf.Lerp(f.Origin.z, f.Target.z, t);
-
-                    // Y：抛物线弧：高点在 t=0.5，起落分别为 1.5 和 0.5
                     float arcY = Mathf.Lerp(1.5f, 0.5f, t) + Mathf.Sin(t * Mathf.PI) * 1.5f;
-                    f.Ball.transform.position = new Vector3(px, arcY, pz);
-
-                    // 越接近落点越大（0.35 → 0.8），模拟落地感
-                    float s = Mathf.Lerp(0.35f, 0.8f, t);
+                    f.Ball.transform.position   = new Vector3(px, arcY, pz);
+                    float s = Mathf.Lerp(0.35f, 0.75f, t);
                     f.Ball.transform.localScale = new Vector3(s, s, s);
 
                     if (f.FramesLeft <= 0)
                     {
-                        // 切换到爆炸阶段
-                        f.Exploded    = true;
-                        f.FramesTotal = CannonExplosionFrames;
-                        f.FramesLeft  = CannonExplosionFrames;
+                        f.Exploded = true;
+                        f.FramesTotal = CannonExplosionFrames; f.FramesLeft = CannonExplosionFrames;
                         f.Ball.SetActive(false);
-                        // 爆炸球放在落点，初始 0.5 小球
                         f.Explosion.transform.position   = new Vector3(f.Target.x, 0.5f, f.Target.z);
                         f.Explosion.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
                         f.Explosion.SetActive(true);
@@ -322,26 +362,17 @@ namespace BoomNetwork.Samples.TowerDefense
                 }
                 else
                 {
-                    // 爆炸阶段：快速膨胀（0.5→4.5）再收缩消失
                     float t = 1f - (float)f.FramesLeft / f.FramesTotal;
-                    float s;
-                    if (t < 0.4f)
-                        s = Mathf.Lerp(0.5f, 4.5f, t / 0.4f);          // 膨胀
-                    else
-                        s = Mathf.Lerp(4.5f, 0.05f, (t - 0.4f) / 0.6f); // 快速收缩
-                    // 爆炸是扁圆形——XZ 大，Y 矮，俯视圆形填满 AoE 范围感
-                    f.Explosion.transform.localScale = new Vector3(s, s * 0.35f, s);
-
-                    if (f.FramesLeft <= 0)
-                    {
-                        f.Active = false;
-                        f.Explosion.SetActive(false);
-                    }
+                    float s = t < 0.4f
+                        ? Mathf.Lerp(0.5f, 4.5f, t / 0.4f)
+                        : Mathf.Lerp(4.5f, 0.05f, (t - 0.4f) / 0.6f);
+                    f.Explosion.transform.localScale = new Vector3(s, s * 0.3f, s);
+                    if (f.FramesLeft <= 0) { f.Active = false; f.Explosion.SetActive(false); }
                 }
             }
         }
 
-        // ==================== 魔法塔特效 ====================
+        // ==================== Magic FX ====================
 
         void SpawnMagic(Vector3 target)
         {
@@ -349,12 +380,9 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _magicFx[i];
                 if (f.Active) continue;
-                f.Active      = true;
-                f.Target      = target;
-                f.FramesTotal = 10;
-                f.FramesLeft  = 10;
-                f.Obj.SetActive(true);
+                f.Active = true; f.Target = target; f.FramesTotal = 12; f.FramesLeft = 12;
                 f.Obj.transform.position = target;
+                f.Obj.SetActive(true);
                 return;
             }
         }
@@ -365,28 +393,21 @@ namespace BoomNetwork.Samples.TowerDefense
             {
                 ref var f = ref _magicFx[i];
                 if (!f.Active) continue;
-
                 f.FramesLeft--;
-                if (f.FramesLeft <= 0)
-                {
-                    f.Active = false;
-                    f.Obj.SetActive(false);
-                    continue;
-                }
-
+                if (f.FramesLeft <= 0) { f.Active = false; f.Obj.SetActive(false); continue; }
                 float t     = 1f - (float)f.FramesLeft / f.FramesTotal;
-                float pulse = Mathf.Sin(t * Mathf.PI); // 0→1→0
-                float s     = 0.15f + pulse * 1.0f;
-                f.Obj.transform.localScale = new Vector3(s, s * 0.3f, s); // 扁平光环
+                float pulse = Mathf.Sin(t * Mathf.PI);
+                float s     = 0.15f + pulse * 1.2f;
+                f.Obj.transform.localScale = new Vector3(s, s * 0.25f, s);
             }
         }
 
-        // ==================== Shadow copy ====================
+        // ==================== Shadow Copy ====================
 
         void CaptureFrameShadow()
         {
-            for (int i = 0; i < GameState.GridSize; i++)
-                _prevCooldown[i] = _state.Grid[i].CooldownFrames;
+            for (int i = 0; i < GameState.GridSize; i++)   _prevCooldown[i]  = _state.Grid[i].CooldownFrames;
+            for (int i = 0; i < GameState.MaxEnemies; i++) _prevEnemyHp[i]   = _state.Enemies[i].Hp;
         }
 
         // ==================== Mouse → Grid Cell ====================
@@ -395,16 +416,13 @@ namespace BoomNetwork.Samples.TowerDefense
         {
             gx = gy = -1;
             if (_cam == null) return false;
-
             Ray ray = _cam.ScreenPointToRay(new Vector3(screenPos.x, screenPos.y, 0f));
             if (Mathf.Abs(ray.direction.y) < 0.0001f) return false;
             float t = -ray.origin.y / ray.direction.y;
             if (t < 0f) return false;
             Vector3 hit = ray.origin + t * ray.direction;
-
             gx = Mathf.FloorToInt(hit.x);
             gy = Mathf.FloorToInt(hit.z);
-
             if (!GameState.IsInBounds(gx, gy)) { gx = gy = -1; return false; }
             return true;
         }
@@ -413,23 +431,38 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void CreateMaterials()
         {
-            var sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            // 优先 URP Lit，回退 Standard
+            var sh  = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            var unl = Shader.Find("Universal Render Pipeline/Unlit") ?? sh;
 
-            _matGround    = new Material(sh) { color = new Color(0.13f, 0.14f, 0.16f) };
-            _matGridLine  = new Material(sh) { color = new Color(0.22f, 0.24f, 0.28f) };
-            _matBase      = new Material(sh) { color = new Color(0.9f, 0.7f, 0.1f) };
-            _matArrow     = new Material(sh) { color = new Color(0.3f, 0.9f, 0.3f) };
-            _matCannon    = new Material(sh) { color = new Color(0.9f, 0.5f, 0.1f) };
-            _matMagic     = new Material(sh) { color = new Color(0.5f, 0.3f, 1.0f) };
-            _matBasic     = new Material(sh) { color = new Color(0.9f, 0.2f, 0.2f) };
-            _matFast      = new Material(sh) { color = new Color(1.0f, 0.6f, 0.1f) };
-            _matTank      = new Material(sh) { color = new Color(0.5f, 0.1f, 0.1f) };
-            _matBasicSlow = new Material(sh) { color = new Color(0.4f, 0.4f, 0.9f) };
+            // 地面与格子（棋盘格增强层次感）
+            _matGround   = new Material(sh)  { color = new Color(0.10f, 0.11f, 0.14f) };
+            _matGridEven = new Material(unl) { color = new Color(0.14f, 0.16f, 0.20f) };
+            _matGridOdd  = new Material(unl) { color = new Color(0.17f, 0.19f, 0.24f) };
 
-            _matFxArrow     = new Material(sh) { color = new Color(1.0f, 0.95f, 0.3f) };  // 明黄箭矢
-            _matFxBall      = new Material(sh) { color = new Color(1.0f, 0.85f, 0.1f) };  // 亮黄炮弹（高对比）
-            _matFxExplosion = new Material(sh) { color = new Color(1.0f, 0.35f, 0.0f) };  // 橙红爆炸
-            _matFxMagic     = new Material(sh) { color = new Color(0.75f, 0.3f, 1.0f) };  // 紫光
+            // 基地
+            _matBase       = new Material(sh) { color = new Color(0.80f, 0.60f, 0.10f) };
+            _matBaseBeacon = new Material(sh) { color = new Color(1.00f, 0.85f, 0.20f) };
+
+            // 塔
+            _matArrow    = new Material(sh) { color = new Color(0.15f, 0.75f, 0.30f) }; // 绿
+            _matArrowTop = new Material(sh) { color = new Color(0.80f, 1.00f, 0.60f) }; // 亮绿尖顶
+            _matCannon   = new Material(sh) { color = new Color(0.75f, 0.35f, 0.05f) }; // 深橙
+            _matCannonBall = new Material(sh) { color = new Color(0.25f, 0.25f, 0.30f) }; // 炮管灰
+            _matMagic    = new Material(sh) { color = new Color(0.45f, 0.15f, 0.85f) }; // 深紫
+            _matMagicOrb = new Material(sh) { color = new Color(0.85f, 0.55f, 1.00f) }; // 亮紫水晶
+
+            // 敌人
+            _matBasic  = new Material(sh) { color = new Color(0.90f, 0.15f, 0.15f) }; // 红
+            _matFast   = new Material(sh) { color = new Color(1.00f, 0.55f, 0.05f) }; // 橙
+            _matTank   = new Material(sh) { color = new Color(0.40f, 0.05f, 0.05f) }; // 暗红
+            _matSlowed = new Material(sh) { color = new Color(0.35f, 0.35f, 0.90f) }; // 减速蓝
+
+            // FX
+            _matFxArrow     = new Material(sh) { color = new Color(1.00f, 0.95f, 0.30f) };
+            _matFxBall      = new Material(sh) { color = new Color(1.00f, 0.85f, 0.10f) };
+            _matFxExplosion = new Material(sh) { color = new Color(1.00f, 0.35f, 0.00f) };
+            _matFxMagic     = new Material(sh) { color = new Color(0.80f, 0.30f, 1.00f) };
         }
 
         void CreateCamera()
@@ -438,13 +471,18 @@ namespace BoomNetwork.Samples.TowerDefense
             camObj.transform.SetParent(transform);
             _cam = camObj.AddComponent<Camera>();
             _cam.clearFlags = CameraClearFlags.SolidColor;
-            _cam.backgroundColor = new Color(0.06f, 0.06f, 0.08f);
+            _cam.backgroundColor = new Color(0.04f, 0.04f, 0.06f);
             _cam.orthographic = true;
-            _cam.orthographicSize = 12f;
+            _cam.orthographicSize = CamOrtho;
             _cam.nearClipPlane = 0.1f;
-            _cam.farClipPlane = 60f;
-            _cam.transform.position = new Vector3(MapCenter.x, CamHeight, MapCenter.z);
-            _cam.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            _cam.farClipPlane = 80f;
+
+            // 70° 斜视角：摄像机在地图中心正上方偏后方
+            float tiltRad = CamTiltX * Mathf.Deg2Rad;
+            float camY    = CamHeight;
+            float camBack = camY / Mathf.Tan(tiltRad); // 向后退以对准地图
+            camObj.transform.position = new Vector3(MapCenter.x, camY, MapCenter.z - camBack);
+            camObj.transform.rotation = Quaternion.Euler(CamTiltX, 0f, 0f);
 
             var mainCam = Camera.main;
             if (mainCam != null && mainCam != _cam) mainCam.gameObject.SetActive(false);
@@ -452,76 +490,84 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void CreateGround()
         {
-            var obj = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            obj.name = "TD_Ground";
-            obj.transform.SetParent(transform);
-            obj.transform.position = new Vector3(MapCenter.x, -0.01f, MapCenter.z);
-            obj.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            obj.transform.localScale = new Vector3(GameState.GridW, GameState.GridH, 1f);
-            obj.GetComponent<Renderer>().sharedMaterial = _matGround;
-            DestroyCollider(obj);
-        }
-
-        void CreateGridLines()
-        {
-            for (int x = 0; x <= GameState.GridW; x++)
+            // 棋盘格：每格单独 Quad
+            for (int cy = 0; cy < GameState.GridH; cy++)
             {
-                var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                obj.name = "TD_VLine";
-                obj.transform.SetParent(transform);
-                obj.transform.position = new Vector3(x, 0f, MapCenter.z);
-                obj.transform.localScale = new Vector3(0.02f, 0.01f, GameState.GridH);
-                obj.GetComponent<Renderer>().sharedMaterial = _matGridLine;
-                DestroyCollider(obj);
-            }
-            for (int z = 0; z <= GameState.GridH; z++)
-            {
-                var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                obj.name = "TD_HLine";
-                obj.transform.SetParent(transform);
-                obj.transform.position = new Vector3(MapCenter.x, 0f, z);
-                obj.transform.localScale = new Vector3(GameState.GridW, 0.01f, 0.02f);
-                obj.GetComponent<Renderer>().sharedMaterial = _matGridLine;
-                DestroyCollider(obj);
+                for (int cx = 0; cx < GameState.GridW; cx++)
+                {
+                    var cell = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    cell.name = "TD_Cell";
+                    cell.transform.SetParent(transform);
+                    cell.transform.position = new Vector3(cx + 0.5f, 0f, cy + 0.5f);
+                    cell.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    cell.transform.localScale = new Vector3(0.98f, 0.98f, 1f);
+                    bool even = (cx + cy) % 2 == 0;
+                    cell.GetComponent<Renderer>().sharedMaterial = even ? _matGridEven : _matGridOdd;
+                    DestroyCollider(cell);
+                }
             }
         }
 
         void CreateBase()
         {
+            // 2×2 基地底板
             for (int dy = 0; dy < 2; dy++)
             {
                 for (int dx = 0; dx < 2; dx++)
                 {
-                    int cx = GameState.BaseCX + dx;
-                    int cy = GameState.BaseCY + dy;
+                    int cx = GameState.BaseCX + dx, cy = GameState.BaseCY + dy;
                     var obj = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                    obj.name = "TD_Base";
+                    obj.name = "TD_BaseTile";
                     obj.transform.SetParent(transform);
-                    obj.transform.position = new Vector3(cx + 0.5f, 0.02f, cy + 0.5f);
-                    obj.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-                    obj.transform.localScale = new Vector3(0.9f, 0.9f, 1f);
+                    obj.transform.position  = new Vector3(cx + 0.5f, 0.01f, cy + 0.5f);
+                    obj.transform.rotation  = Quaternion.Euler(90f, 0f, 0f);
+                    obj.transform.localScale = new Vector3(0.97f, 0.97f, 1f);
                     obj.GetComponent<Renderer>().sharedMaterial = _matBase;
                     DestroyCollider(obj);
                 }
             }
+
+            // 中心脉动光标（Sphere 扁平化）
+            _baseBeacon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            _baseBeacon.name = "TD_BaseBeacon";
+            _baseBeacon.transform.SetParent(transform);
+            _baseBeacon.transform.position   = new Vector3(GameState.BaseCX + 1.0f, 0.2f, GameState.BaseCY + 1.0f);
+            _baseBeacon.transform.localScale  = new Vector3(0.8f, 0.2f, 0.8f);
+            _baseBeaconRend = _baseBeacon.GetComponent<Renderer>();
+            _baseBeaconRend.material = new Material(_matBaseBeacon);
+            DestroyCollider(_baseBeacon);
         }
 
         void CreateTowerPool()
         {
             for (int i = 0; i < GameState.GridSize; i++)
             {
-                int cx = i % GameState.GridW;
-                int cy = i / GameState.GridW;
-                var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                obj.name = "TD_Tower";
-                obj.transform.SetParent(transform);
-                obj.transform.position = new Vector3(cx + 0.5f, 0.4f, cy + 0.5f);
-                obj.transform.localScale = new Vector3(0.8f, 0.8f, 0.8f);
-                _towerRend[i] = obj.GetComponent<Renderer>();
-                _towerRend[i].sharedMaterial = _matArrow;
-                DestroyCollider(obj);
-                obj.SetActive(false);
-                _towerObjs[i] = obj;
+                int cx = i % GameState.GridW, cy = i / GameState.GridW;
+                float wx = cx + 0.5f, wz = cy + 0.5f;
+
+                // 底座（弓箭=Cylinder，炮台=Cylinder，魔法=Cylinder）
+                var tBase = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                tBase.name = "TD_TowerBase";
+                tBase.transform.SetParent(transform);
+                tBase.transform.position   = new Vector3(wx, 0.4f, wz);
+                tBase.transform.localScale = new Vector3(0.35f, 0.5f, 0.35f);
+                _towerBaseRend[i] = tBase.GetComponent<Renderer>();
+                _towerBaseRend[i].sharedMaterial = _matArrow;
+                DestroyCollider(tBase);
+                tBase.SetActive(false);
+                _towerBase[i] = tBase;
+
+                // 顶部装饰（弓箭=Cube尖顶，炮台=Sphere炮球，魔法=Sphere水晶球）
+                var tDeco = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                tDeco.name = "TD_TowerDeco";
+                tDeco.transform.SetParent(transform);
+                tDeco.transform.position   = new Vector3(wx, 1.1f, wz);
+                tDeco.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f);
+                _towerDecoRend[i] = tDeco.GetComponent<Renderer>();
+                _towerDecoRend[i].sharedMaterial = _matArrowTop;
+                DestroyCollider(tDeco);
+                tDeco.SetActive(false);
+                _towerDeco[i] = tDeco;
             }
         }
 
@@ -529,10 +575,11 @@ namespace BoomNetwork.Samples.TowerDefense
         {
             for (int i = 0; i < GameState.MaxEnemies; i++)
             {
+                // Basic/Tank 用 Cube，Fast 用 Cube（旋转 45°）
                 var obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 obj.name = "TD_Enemy";
                 obj.transform.SetParent(transform);
-                obj.transform.localScale = new Vector3(0.5f, 0.6f, 0.5f);
+                obj.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
                 _enemyRend[i] = obj.GetComponent<Renderer>();
                 _enemyRend[i].sharedMaterial = _matBasic;
                 DestroyCollider(obj);
@@ -551,7 +598,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 obj.GetComponent<Renderer>().sharedMaterial = _matFxArrow;
                 DestroyCollider(obj);
                 obj.SetActive(false);
-                _arrowFx[i] = new ArrowEffect { Obj = obj };
+                _arrowFx[i] = new ArrowFx { Obj = obj };
             }
         }
 
@@ -559,7 +606,6 @@ namespace BoomNetwork.Samples.TowerDefense
         {
             for (int i = 0; i < CannonFxPool; i++)
             {
-                // 炮弹球
                 var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 ball.name = "TD_CannonBall";
                 ball.transform.SetParent(transform);
@@ -567,7 +613,6 @@ namespace BoomNetwork.Samples.TowerDefense
                 DestroyCollider(ball);
                 ball.SetActive(false);
 
-                // 爆炸球（单独实例，比炮弹大得多）
                 var expl = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 expl.name = "TD_CannonExpl";
                 expl.transform.SetParent(transform);
@@ -575,7 +620,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 DestroyCollider(expl);
                 expl.SetActive(false);
 
-                _cannonFx[i] = new CannonBall { Ball = ball, Explosion = expl };
+                _cannonFx[i] = new CannonFx { Ball = ball, Explosion = expl };
             }
         }
 
@@ -589,7 +634,7 @@ namespace BoomNetwork.Samples.TowerDefense
                 obj.GetComponent<Renderer>().sharedMaterial = _matFxMagic;
                 DestroyCollider(obj);
                 obj.SetActive(false);
-                _magicFx[i] = new MagicEffect { Obj = obj };
+                _magicFx[i] = new MagicFx { Obj = obj };
             }
         }
 
@@ -601,9 +646,12 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void OnDestroy()
         {
-            Destroy(_matGround); Destroy(_matGridLine); Destroy(_matBase);
-            Destroy(_matArrow); Destroy(_matCannon); Destroy(_matMagic);
-            Destroy(_matBasic); Destroy(_matFast); Destroy(_matTank); Destroy(_matBasicSlow);
+            Destroy(_matGround); Destroy(_matGridEven); Destroy(_matGridOdd);
+            Destroy(_matBase); Destroy(_matBaseBeacon);
+            Destroy(_matArrow); Destroy(_matArrowTop);
+            Destroy(_matCannon); Destroy(_matCannonBall);
+            Destroy(_matMagic); Destroy(_matMagicOrb);
+            Destroy(_matBasic); Destroy(_matFast); Destroy(_matTank); Destroy(_matSlowed);
             Destroy(_matFxArrow); Destroy(_matFxBall); Destroy(_matFxExplosion); Destroy(_matFxMagic);
         }
     }

@@ -74,6 +74,7 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void Start()
         {
+            Screen.orientation = ScreenOrientation.LandscapeLeft;
             _sim     = new TDSimulation();
             _network = GetComponent<BoomNetworkManager>();
 

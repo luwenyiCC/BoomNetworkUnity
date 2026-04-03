@@ -669,13 +669,23 @@ namespace BoomNetwork.Samples.TowerDefense
 
         void CreateCamera()
         {
-            var camObj = new GameObject("TD_Camera");
-            camObj.transform.SetParent(transform);
-            _cam = camObj.AddComponent<Camera>();
+            // Reuse the scene's Main Camera to inherit its UniversalAdditionalCameraData.
+            // Creating a bare Camera via AddComponent skips URP's pipeline setup and results
+            // in a black screen on Android. Reconfiguring the existing camera is the safe path.
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                _cam = mainCam;
+            }
+            else
+            {
+                var camObj = new GameObject("TD_Camera");
+                _cam = camObj.AddComponent<Camera>();
+            }
+
             _cam.clearFlags = CameraClearFlags.SolidColor;
             _cam.backgroundColor = new Color(0.04f, 0.04f, 0.06f);
             _cam.orthographic = true;
-            // Ensure the full 20-unit wide map is visible on any aspect ratio (including portrait phones)
             float aspect = Screen.width > 0 && Screen.height > 0
                 ? (float)Screen.width / Screen.height : 16f / 9f;
             _cam.orthographicSize = Mathf.Max(CamOrtho, 10f / aspect + 1f);
@@ -685,12 +695,10 @@ namespace BoomNetwork.Samples.TowerDefense
             // 70° 斜视角：摄像机在地图中心正上方偏后方
             float tiltRad = CamTiltX * Mathf.Deg2Rad;
             float camY    = CamHeight;
-            float camBack = camY / Mathf.Tan(tiltRad); // 向后退以对准地图
-            camObj.transform.position = new Vector3(MapCenter.x, camY, MapCenter.z - camBack);
-            camObj.transform.rotation = Quaternion.Euler(CamTiltX, 0f, 0f);
-
-            var mainCam = Camera.main;
-            if (mainCam != null && mainCam != _cam) mainCam.gameObject.SetActive(false);
+            float camBack = camY / Mathf.Tan(tiltRad);
+            _cam.transform.position = new Vector3(MapCenter.x, camY, MapCenter.z - camBack);
+            _cam.transform.rotation = Quaternion.Euler(CamTiltX, 0f, 0f);
+            _lastAspect = aspect;
         }
 
         void CreateGround()

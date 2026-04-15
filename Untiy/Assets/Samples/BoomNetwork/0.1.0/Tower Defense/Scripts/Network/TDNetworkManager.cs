@@ -59,6 +59,14 @@ namespace BoomNetwork.Samples.TowerDefense
         bool _stylesCached;
         GUIStyle _boxStyle, _titleStyle, _labelStyle, _btnStyle, _smallStyle,
                  _btnSelectedStyle, _btnDimStyle, _btnRedStyle;
+        // Used by DrawConnectingUI — cached to avoid per-frame GUIStyle allocation
+        GUIStyle _connectingStyle;
+        // Used by DrawRoomBadge — cached to avoid per-frame GUIStyle allocation
+        GUIStyle _badgeStyle;
+        // Used by DrawDesyncOverlay — cached to avoid per-frame GUIStyle allocation
+        GUIStyle _desyncLabelStyle;
+        // Used by DrawGameOverOverlay — cached to avoid per-frame GUIStyle allocation
+        GUIStyle _gameOverLabelStyle;
 
         // GUI DPI scaling — all Rects use explicit S() helpers; no GUI.matrix
         float _guiScale = 1f, _sw, _sh, _lastStyleScale;
@@ -88,8 +96,8 @@ namespace BoomNetwork.Samples.TowerDefense
             c.OnFrameSyncStop  += OnFrameSyncStop;
             c.OnFrame          += OnFrame;
             c.OnJoinedRoom     += OnJoinedRoom;
-            c.OnPlayerJoined   += OnPlayerJoined;
-            c.OnPlayerLeft     += OnPlayerLeft;
+            c.OnPlayerJoinedMsg += OnPlayerJoined;
+            c.OnPlayerLeftMsg   += OnPlayerLeft;
             c.OnLeftRoom       += OnLeftRoom;
             c.OnTakeSnapshot    = TakeSnapshot;
             c.OnLoadSnapshot    = LoadSnapshot;
@@ -386,15 +394,23 @@ namespace BoomNetwork.Samples.TowerDefense
                 { normal = { textColor = new Color(0.5f, 0.5f, 0.5f) } };
             _btnRedStyle = new GUIStyle(_btnStyle)
                 { normal = { textColor = new Color(1f, 0.4f, 0.4f) } };
+            _connectingStyle = new GUIStyle(GUI.skin.label)
+                { fontSize = Si(18), alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
+            _badgeStyle = new GUIStyle(GUI.skin.label)
+                { fontSize = Si(11), normal = { textColor = new Color(0.7f, 0.9f, 1f) } };
+            _desyncLabelStyle = new GUIStyle(GUI.skin.label)
+                { fontSize = Si(18), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
+                  normal = { textColor = Color.red }, richText = true };
+            _gameOverLabelStyle = new GUIStyle(GUI.skin.label)
+                { fontSize = Si(22), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
+                  normal = { textColor = Color.white }, richText = true };
         }
 
         // ==================== Connecting UI ====================
 
         void DrawConnectingUI()
         {
-            var style = new GUIStyle(GUI.skin.label)
-                { fontSize = Si(18), alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white } };
-            GUI.Label(new Rect(0, 0, _sw, _sh), "连接中…", style);
+            GUI.Label(new Rect(0, 0, _sw, _sh), "连接中…", _connectingStyle);
         }
 
         // ==================== Lobby UI ====================
@@ -525,9 +541,7 @@ namespace BoomNetwork.Samples.TowerDefense
         void DrawRoomBadge()
         {
             int roomId = _network.Client.RoomId;
-            var style = new GUIStyle(GUI.skin.label)
-                { fontSize = Si(11), normal = { textColor = new Color(0.7f, 0.9f, 1f) } };
-            GUI.Label(new Rect(S(10), S(4), S(120), S(18)), $"房间 #{roomId}", style);
+            GUI.Label(new Rect(S(10), S(4), S(120), S(18)), $"房间 #{roomId}", _badgeStyle);
         }
 
         // ==================== InGame HUD ====================
@@ -722,10 +736,7 @@ namespace BoomNetwork.Samples.TowerDefense
             float px = (_sw - w) / 2f;
             float py = _sh * 0.2f;
             GUI.Box(new Rect(px, py, w, h), "", _boxStyle);
-            var style = new GUIStyle(GUI.skin.label)
-                { fontSize = Si(18), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
-                  normal = { textColor = Color.red }, richText = true };
-            GUI.Label(new Rect(px, py, w, h), $"<b>检测到不同步</b>\n第 {_desyncFrame} 帧", style);
+            GUI.Label(new Rect(px, py, w, h), $"<b>检测到不同步</b>\n第 {_desyncFrame} 帧", _desyncLabelStyle);
         }
 
         void DrawGameOverOverlay()
@@ -740,10 +751,7 @@ namespace BoomNetwork.Samples.TowerDefense
             float px = (_sw - w) / 2f;
             float py = _sh * 0.35f;
             GUI.Box(new Rect(px, py, w, h), "", _boxStyle);
-            var style = new GUIStyle(GUI.skin.label)
-                { fontSize = Si(22), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter,
-                  normal = { textColor = Color.white }, richText = true };
-            GUI.Label(new Rect(px, py, w, S(70)), msg, style);
+            GUI.Label(new Rect(px, py, w, S(70)), msg, _gameOverLabelStyle);
 
             float btnY = py + S(80);
             if (!victory)
